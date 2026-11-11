@@ -14,6 +14,7 @@ media3 = "1.5.1"
 haze = "1.6.10"
 apollo = "5.2.0"
 codeScanner = "16.1.0"
+zxing = "3.5.3"
 
 [libraries]
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
@@ -37,6 +38,8 @@ media3-datasource = { module = "androidx.media3:media3-datasource", version.ref 
 media3-database = { module = "androidx.media3:media3-database", version.ref = "media3" }
 media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "media3" }
 media3-muxer = { module = "androidx.media3:media3-muxer", version.ref = "media3" }
+media3-datasource-okhttp = { module = "androidx.media3:media3-datasource-okhttp", version.ref = "media3" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
 work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 apollo-runtime = { module = "com.apollographql.apollo:apollo-runtime", version.ref = "apollo" }

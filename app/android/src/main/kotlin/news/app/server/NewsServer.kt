@@ -339,7 +339,36 @@ class NewsServer(
             unreachable(current)
             throw e
         }
+        refreshRole()
     }
+
+    /**
+     * Who the phone is on the server (`me`): its user's role decides whether Settings shows the server's controls. A
+     * server from before roles doesn't know `me` (an error answer): everyone changes its settings there, so admin.
+     */
+    private suspend fun refreshRole() {
+        val role = try {
+            call { it.me() }.role
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            if (e.code == UNAUTHORIZED) return
+            UserRole.ADMIN
+        } catch (e: Exception) {
+            return
+        }
+        setRole(role)
+    }
+
+    private fun setRole(role: UserRole) {
+        val now = account ?: return
+        if (now.role == role.name) return
+        setAccount(now.copy(role = role.name))
+        _state.update { (it as? ServerState.Connected)?.copy(admin = role == UserRole.ADMIN) ?: it }
+    }
+
+    /** The user's role as last heard; null before the server said. */
+    val role: UserRole? get() = account?.role?.let { r -> UserRole.entries.firstOrNull { it.name == r } }
 
     /**
      * In the certificate's last 30 days, a new key and a certificate for it (renewCertificate), asked with the
@@ -626,6 +655,121 @@ class NewsServer(
         }
     }
 
+    // --- This user's own choices: hidden sites, read marks ------------------------------------------------------------
+
+    /** Hides a site from this user's feed or shows it again; the site as it is now, or null when it didn't take it. */
+    suspend fun setSourceHidden(id: String, hidden: Boolean): ServerSource? {
+        val current = account ?: return null
+        return try {
+            call { it.setSourceHidden(id, hidden) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            null
+        } catch (e: Exception) {
+            unreachable(current)
+            null
+        }
+    }
+
+    /** Marks [urls] read for this user, [ServerApi.MAX_MARK_READ] at a time; whether the server took them all. */
+    suspend fun markRead(urls: List<String>): Boolean {
+        val current = account ?: return false
+        if (urls.isEmpty()) return true
+        return try {
+            urls.chunked(ServerApi.MAX_MARK_READ).forEach { chunk -> call { it.markRead(chunk) } }
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            false
+        } catch (e: Exception) {
+            unreachable(current)
+            false
+        }
+    }
+
+    /** The read marks this user made on any device since [since]; null when it isn't [inUse] or doesn't answer. */
+    suspend fun readArticles(since: Instant?): List<ReadMark>? {
+        val current = account ?: return null
+        return try {
+            call { it.readArticles(since) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            null
+        } catch (e: Exception) {
+            unreachable(current)
+            null
+        }
+    }
+
+    // --- Video -------------------------------------------------------------------------------------------------------
+
+    /**
+     * [articleUrl]'s video as the server relays it ([ServerApi.videoStream]): its full address on the server, played
+     * with [mediaClient]. Null when the server has no stream for it (the embed plays in a web view then) or doesn't answer.
+     */
+    suspend fun videoStream(articleUrl: String): ServerVideo? {
+        val current = account ?: return null
+        return try {
+            val found = call { it.videoStream(articleUrl) } ?: return null
+            ServerVideo(videoUrl(account?.url ?: current.url, found.path), found.hls)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            null
+        } catch (e: Exception) {
+            unreachable(current)
+            null
+        }
+    }
+
+    private var media: Pair<ServerAccount, okhttp3.OkHttpClient>? = null
+
+    /**
+     * An OkHttp client for the server's video ([videoStream]): the phone's certificate, the server's pinned key. The
+     * same one while the account stays; null when it isn't enrolled.
+     */
+    suspend fun mediaClient(): okhttp3.OkHttpClient? {
+        val current = account ?: return null
+        media?.takeIf { (a, _) -> a.url == current.url && a.keyAlias == current.keyAlias && a.fingerprint == current.fingerprint }?.let { return it.second }
+        val identity = withContext(io) { keys.identity(current.keyAlias) } ?: return null
+        val client = serverHttpClient(PinnedTrustManager(current.fingerprint), identity)
+        media = current to client
+        return client
+    }
+
+    // --- Admin: the server's people ----------------------------------------------------------------------------------
+
+    /** Every user and their devices. A failure (FORBIDDEN: not an admin any more) is the result's. */
+    suspend fun users(): Result<List<ServerUser>> = admin { it.users() }
+
+    /** A one-time code and QR link for [user]'s next device, the user made with [role] when new. */
+    suspend fun createInvite(user: String, role: UserRole): Result<Invite> = admin { it.createInvite(user, role) }
+
+    suspend fun setUserRole(user: String, role: UserRole): Result<ServerUser> = admin { it.setUserRole(user, role) }
+
+    suspend fun revokeDevice(serial: String): Result<Boolean> = admin { it.revokeDevice(serial) }
+
+    suspend fun removeUser(user: String): Result<Boolean> = admin { it.removeUser(user) }
+
+    /** An admin call: FORBIDDEN means this user isn't an admin (any more), so the controls go. */
+    private suspend fun <T> admin(block: suspend (ServerApi) -> T): Result<T> {
+        val current = account ?: return Result.failure(IllegalStateException("Not enrolled"))
+        return try {
+            Result.success(call(block))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            if (e.code == FORBIDDEN) setRole(UserRole.USER)
+            Result.failure(e)
+        } catch (e: Exception) {
+            unreachable(current)
+            Result.failure(e)
+        }
+    }
+
     // --- Helpers -----------------------------------------------------------------------------------------------------
 
     /** The headlines kept from earlier runs, once; under [feedLock]. */
@@ -747,6 +891,7 @@ class NewsServer(
             dhtFoundAt = account.dhtFoundAt,
             certificateExpires = account.certificateExpires,
             unreachableSince = unreachableSince,
+            admin = account.role == UserRole.ADMIN.name,
         )
     }
 
@@ -756,8 +901,17 @@ class NewsServer(
 
         /** A certificate is renewed in its last 30 days, as the server allows. */
         val RENEW_BEFORE = 30.days
+
+        /** extensions.code of an @admin field asked by a user. */
+        const val FORBIDDEN = "FORBIDDEN"
+
+        /** extensions.code without a valid certificate. */
+        const val UNAUTHORIZED = "UNAUTHORIZED"
     }
 }
+
+/** A path the server gave ([ServerApi.videoStream]) on the server at [base]. */
+internal fun videoUrl(base: String, path: String): String = base.trimEnd('/') + "/" + path.trimStart('/')
 
 /** What went wrong, as the server screen tells it. */
 internal fun errorOf(e: Throwable): ServerError {

@@ -28,15 +28,8 @@ internal class SiteList(private val file: File) {
     }
 }
 
-/** A native stream for an article's video: a URL a player opens directly, and whether it is an HLS playlist. */
+/** A native stream for an article's video (the server's relay, or the archive's file), and whether it is an HLS playlist. */
 data class ResolvedStream(val url: String, val isHls: Boolean)
-
-/**
- * The stream the app plays for [video]: the one the server sent ([news.core.model.ArticleVideo.stream]), or null to
- * leave the video to its web-view [news.core.model.ArticleVideo.embed]. The phone works out no streams of its own.
- */
-fun streamFor(video: news.core.model.ArticleVideo): ResolvedStream? =
-    video.stream?.let { ResolvedStream(it, it.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) }
 
 /** The User-Agent pictures and videos are loaded with: a phone browser's, since some media servers refuse others. */
 const val MEDIA_USER_AGENT =

@@ -41,6 +41,8 @@ data class ServerAccount(
     val serverId: String? = null,
     /** When the DHT last found the server (its address had changed); null if it never had to. */
     @Serializable(with = news.core.model.InstantIsoSerializer::class) val dhtFoundAt: Instant? = null,
+    /** The user's role (`me`): ADMIN or USER; null until the server said. */
+    val role: String? = null,
 )
 
 /** Where [NewsServer] keeps the account and the server's headlines between runs. Blocking. */

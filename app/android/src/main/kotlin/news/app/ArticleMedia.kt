@@ -141,13 +141,14 @@ fun ArticlePhoto(image: ArticleBlock.Image, captionInset: Dp, standIn: String? =
 
 /**
  * The article's video across the full width: its poster with a play button, then, once tapped, the video playing in
- * place. A native stream plays in Media3's player, whose full-screen button moves the same playback to full screen;
- * the stream is [ArticleVideo.stream] as the server sent it ([streamFor]). A video that has only the site's own player
- * ([ArticleVideo.embed], no stream) runs that player in a web view, whose own full-screen button is honoured. It stops
- * once it is no longer [active].
+ * place. The video comes through the news server ([news.app.server.NewsServer.videoStream]): it relays the stream, HLS
+ * or an MP4, which plays in Media3's player with the phone's certificate ([news.app.server.NewsServer.mediaClient]);
+ * its full-screen button moves the same playback to full screen. When the server has no stream for it, a video that
+ * has the site's own player ([ArticleVideo.embed]) runs that player in a web view, whose own full-screen button is
+ * honoured. It stops once it is no longer [active].
  *
  * While it plays natively, playback fills the app's video cache; and, when an archive folder is set, the video is also
- * copied there as a single highest-res MP4, just like the article's pictures ([NewsApplication.archiveVideo]).
+ * copied there as a single highest-res MP4, from the server's stream ([NewsApplication.archiveVideo]).
  *
  * [stickTo]: where the article's visible area starts, in the window. While the video plays and the article scrolls it
  * up past there, it stays there, over the text, so the rest can be read beside it ([AppSettings.stickyVideo]).
@@ -163,30 +164,36 @@ fun VideoCard(video: ArticleVideo, article: Article, fallbackPoster: String?, ac
     val playingNow = LocalVideoPlaying.current
     LaunchedEffect(playing, active) { if (active) playingNow?.value = playing }
     DisposableEffect(playingNow) { onDispose { if (active) playingNow?.value = false } }
-    var resolving by remember(video) { mutableStateOf(false) }
-    // The stream to play: the one the server sent; without one, the video plays in its embedded player.
-    var resolved by remember(video) { mutableStateOf(streamFor(video)) }
-    var unresolved by remember(video) { mutableStateOf(false) }
-    // An archived video plays from its MP4 there (through the video cache), not from the site: looked for on first play.
-    var archiveChecked by remember(video) { mutableStateOf(app.archive == null) }
+    // The stream to play, found on first play: the archive's MP4 when it has one, else the server's stream; without
+    // either, the video plays in its embedded player.
+    var resolved by remember(video) { mutableStateOf<ResolvedStream?>(null) }
+    var fromServer by remember(video) { mutableStateOf<okhttp3.OkHttpClient?>(null) }
+    var looked by remember(video) { mutableStateOf(false) }
     // Swiped away in the reader: the page stays composed next door, so the player is let go.
     LaunchedEffect(active) { if (!active) playing = false }
 
-    // On first play, an archived copy plays in place of the stream.
     LaunchedEffect(playing) {
-        if (playing && !archiveChecked) {
-            withContext(Dispatchers.IO) { runCatching { app.archivedVideo(article) }.getOrNull() }?.let { resolved = ResolvedStream(it, isHls = false) }
-            archiveChecked = true
+        if (!playing || looked) return@LaunchedEffect
+        val archived = withContext(Dispatchers.IO) { runCatching { app.archivedVideo(article) }.getOrNull() }
+        if (archived != null) {
+            resolved = ResolvedStream(archived, isHls = false)
+        } else {
+            val stream = app.server.videoStream(article.url)
+            val client = stream?.let { app.server.mediaClient() }
+            if (stream != null && client != null) {
+                fromServer = client
+                resolved = ResolvedStream(stream.url, stream.hls)
+            }
         }
-        if (playing && resolved == null && !unresolved && video.embed != null) unresolved = true
+        looked = true
     }
     // A native stream that plays goes to the app cache (the player below) and to the archive when one is set.
-    val stream = resolved?.takeIf { archiveChecked }
+    val stream = resolved?.takeIf { looked }
     LaunchedEffect(playing, stream) {
         if (playing && stream != null) {
             // The video cache drops the videos of the oldest articles first ([NewsApplication.trimMedia]).
             app.scope.launch { runCatching { app.mediaDates.noteVideo(stream.url, article.publishedAt?.toEpochMilliseconds()) } }
-            app.archiveVideo(article, stream)
+            if (fromServer != null) app.archiveVideo(article)
         }
     }
 
@@ -201,9 +208,10 @@ fun VideoCard(video: ArticleVideo, article: Article, fallbackPoster: String?, ac
             contentAlignment = Alignment.Center,
         ) {
             when {
-                playing && stream != null -> InlineStreamPlayer(stream.url, app.videoDataSourceFactory())
-                playing && (resolving || !archiveChecked) -> CircularProgressIndicator(color = Color.White)
+                playing && stream != null -> InlineStreamPlayer(stream.url, stream.isHls, app.videoDataSourceFactory(fromServer))
+                playing && !looked -> CircularProgressIndicator(color = Color.White)
                 playing && embed != null -> InlineSitePlayer(embed)
+                playing -> Text("הסרטון לא זמין כרגע", color = Color.White, style = MaterialTheme.typography.bodyLarge)
                 else -> Poster(video, fallbackPoster, onPlay = { playing = true })
             }
         }
@@ -232,19 +240,20 @@ private fun Poster(video: ArticleVideo, fallbackPoster: String?, onPlay: () -> U
 }
 
 /**
- * A file or HLS playlist, played in place at the highest resolution it offers, through the app's video cache
- * ([dataSourceFactory], upstream a browser's User-Agent) so a replay is served from disk. The player's
+ * A file or HLS playlist ([hls]), played in place at the highest resolution it offers, through the app's video cache
+ * ([dataSourceFactory], upstream the server with the phone's certificate) so a replay is served from disk. The player's
  * full-screen button shows the same player in a full-screen view, so playback carries on where it was.
  */
 @OptIn(UnstableApi::class)
 @Composable
-private fun InlineStreamPlayer(url: String, dataSourceFactory: androidx.media3.datasource.DataSource.Factory) {
+private fun InlineStreamPlayer(url: String, hls: Boolean, dataSourceFactory: androidx.media3.datasource.DataSource.Factory) {
     val context = LocalContext.current
     val player = remember(url) {
         ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory)).build().apply {
             // HLS has several renditions; take the top one.
             trackSelectionParameters = trackSelectionParameters.buildUpon().setForceHighestSupportedBitrate(true).build()
-            setMediaItem(MediaItem.fromUri(url))
+            // The server's paths (…/index.m3u8, …/file) don't always tell the kind: it is said.
+            setMediaItem(MediaItem.Builder().setUri(url).setMimeType(if (hls) androidx.media3.common.MimeTypes.APPLICATION_M3U8 else null).build())
             prepare()
             playWhenReady = true
         }

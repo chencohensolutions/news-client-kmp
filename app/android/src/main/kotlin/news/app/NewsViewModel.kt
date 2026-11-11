@@ -438,7 +438,34 @@ sealed interface ServerState {
         val certificateExpires: Instant,
         /** Set while the server doesn't answer; the feed stays as it was meanwhile. */
         val unreachableSince: Instant? = null,
+        /** The user is the server's admin (`me`): they change its settings and manage its people. */
+        val admin: Boolean = false,
     ) : ServerState
+}
+
+/** The admin page's state: the users, an invite just made (its QR shown), whether a call runs, and its error. */
+data class AdminState(
+    val users: List<news.app.server.ServerUser>? = null,
+    val invite: news.app.server.Invite? = null,
+    val loading: Boolean = false,
+    val error: String? = null,
+)
+
+/** An admin call's failure as the page says it. */
+internal fun adminError(e: Throwable): String = when ((e as? news.app.server.ServerException)?.code) {
+    news.app.server.NewsServer.FORBIDDEN -> "רק מנהל יכול לעשות את זה"
+    "BAD_REQUEST" -> e.message ?: "השרת לא קיבל את השינוי"
+    null -> if (e is news.app.server.ServerException) e.message ?: "השרת לא קיבל את השינוי" else "השרת לא עונה"
+    else -> e.message ?: "השרת לא קיבל את השינוי"
+}
+
+/**
+ * The sites left out of the feed, from the server's list: those it doesn't read, those this user hid there, and
+ * those the phone hid that the server doesn't know (kept for when it does).
+ */
+internal fun feedHidden(local: Set<String>, server: List<ServerSource>): Set<String> {
+    val known = server.mapTo(HashSet()) { it.id }
+    return local.filterTo(HashSet()) { it !in known } + server.filter { !it.enabled || it.hidden }.map { it.id }
 }
 
 enum class ServerError {
@@ -714,6 +741,11 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         _headlines.update { it.copy(refreshing = true) }
         viewModelScope.launch {
             after?.join()
+            // The user's own choices from the server first: the sites they hid and what they read on their other devices.
+            if (newsApp.server.inUse) {
+                newsApp.server.sources()?.let(::showServerSources)
+                syncRead()
+            }
             val result = repository.latest(skip = _settings.value.hiddenSources)
             val before = _headlines.value
             var items = withFilledFrom(result.items, listed)
@@ -922,6 +954,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         _showSettings.value = true
         loadServerSources()
         loadServerGrouping()
+        _admin.value = AdminState()
     }
 
     private val _serverGrouping = MutableStateFlow<ServerGrouping?>(null)
@@ -1010,10 +1043,95 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun showServerSources(list: List<ServerSource>) {
         _serverSources.value = list
-        val off = list.filter { !it.enabled }.mapTo(HashSet()) { it.id }
-        val known = list.mapTo(HashSet()) { it.id }
-        val hidden = _settings.value.hiddenSources.filterTo(HashSet()) { it !in known } + off
+        val hidden = feedHidden(_settings.value.hiddenSources, list)
         if (hidden != _settings.value.hiddenSources) updateSettings(_settings.value.copy(hiddenSources = hidden))
+    }
+
+    /**
+     * Shows [id] in this user's feed or hides it ("מוצג בפיד שלי" on the sites page): their choice, kept on the server
+     * for all their devices; the feed follows at once, and goes back if the server didn't take it.
+     */
+    fun setSourceHidden(id: String, hidden: Boolean) {
+        val before = _serverSources.value ?: return
+        showServerSources(before.map { if (it.id == id) it.copy(hidden = hidden) else it })
+        viewModelScope.launch {
+            val updated = newsApp.server.setSourceHidden(id, hidden)
+            showServerSources((_serverSources.value ?: before).map { if (it.id == id) updated ?: it.copy(hidden = !hidden) else it })
+        }
+    }
+
+    // --- Read marks across the user's devices ([ReadSync]) ---
+
+    private var readFlush: Job? = null
+
+    /** Sends the read marks waiting, a moment after the last one, so a run of swipes goes in one request. */
+    private fun sendReadSoon(urls: Collection<String>) {
+        if (!newsApp.server.inUse) return
+        newsApp.scope.launch {
+            newsApp.readSync.queue(urls)
+            readFlush?.cancel()
+            readFlush = newsApp.scope.launch {
+                delay(READ_FLUSH_MS)
+                newsApp.readSync.flush()
+            }
+        }
+    }
+
+    /** What waits goes to the server; what the user read on their other devices joins the read marks here. */
+    private suspend fun syncRead() {
+        newsApp.readSync.flush()
+        val elsewhere = newsApp.readSync.pull() ?: return
+        val known = _headlines.value.read
+        val fresh = elsewhere.filter { it !in known }
+        if (fresh.isEmpty()) return
+        withContext(readDispatcher) { readHistory.addAll(fresh) }
+        _headlines.update { it.copy(read = it.read + fresh) }
+    }
+
+    // --- Admin: the server's people (Settings › משתמשים, admins only) ---
+
+    private val _admin = MutableStateFlow(AdminState())
+
+    /** The users and their devices, the invite just made, and the last error, for the admin page. */
+    val admin: StateFlow<AdminState> = _admin
+
+    fun loadUsers() {
+        _admin.update { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            newsApp.server.users().fold(
+                onSuccess = { users -> _admin.update { it.copy(users = users, loading = false) } },
+                onFailure = { e -> _admin.update { it.copy(loading = false, error = adminError(e)) } },
+            )
+        }
+    }
+
+    fun createInvite(user: String, role: news.app.server.UserRole) {
+        val name = user.trim()
+        if (name.isEmpty()) return
+        _admin.update { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            newsApp.server.createInvite(name, role).fold(
+                onSuccess = { invite -> _admin.update { it.copy(invite = invite, loading = false) }; loadUsers() },
+                onFailure = { e -> _admin.update { it.copy(loading = false, error = adminError(e)) } },
+            )
+        }
+    }
+
+    fun dismissInvite() = _admin.update { it.copy(invite = null) }
+
+    fun setUserRole(user: String, role: news.app.server.UserRole) = adminChange { newsApp.server.setUserRole(user, role) }
+
+    fun revokeDevice(serial: String) = adminChange { newsApp.server.revokeDevice(serial) }
+
+    fun removeUser(user: String) = adminChange { newsApp.server.removeUser(user) }
+
+    /** An admin change, then the list again (it shows the change as the server keeps it). */
+    private fun adminChange(change: suspend () -> Result<*>) {
+        _admin.update { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            change().onFailure { e -> _admin.update { it.copy(error = adminError(e)) } }
+            loadUsers()
+        }
     }
 
     /** One site's settings on the server (the sites page with the server on); the feed follows a site switched on or off. */
@@ -1291,6 +1409,8 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun disconnectServer() {
         newsApp.server.disconnect()
+        // Another server keeps its own read marks: nothing waits for this one, and the next asks from the start.
+        newsApp.scope.launch { newsApp.readSync.reset() }
         refreshNow()
     }
 
@@ -1555,6 +1675,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         scrolledPast(listOf(summary.url))
         _headlines.update { it.copy(read = it.read + summary.url) }
         viewModelScope.launch(readDispatcher) { readHistory.add(summary.url) }
+        sendReadSoon(listOf(summary.url))
     }
 
     /**
@@ -1584,6 +1705,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         if (unread.isEmpty()) return
         _headlines.update { it.copy(read = it.read + unread) }
         viewModelScope.launch(readDispatcher) { readHistory.addAll(unread) }
+        sendReadSoon(unread)
     }
 
     /**
@@ -1666,6 +1788,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
 
         /** How long after a grouping change the server's stories are asked for again: it regroups in a few seconds. */
         const val REGROUP_WAIT_MS = 6_000L
+
+        /** Read marks go to the server this long after the last one ([sendReadSoon]). */
+        const val READ_FLUSH_MS = 3_000L
 
         /** How long a refresh waits for an enrollment to connect ([afterConnecting]). */
         const val ENROLL_WAIT_MS = 120_000L

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Dns
 import news.app.server.ServerSource
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
@@ -87,7 +88,7 @@ import news.core.model.Categories
 /** The statistics page as Settings shows it ([StatsScreen]). */
 class StatsPage(val stats: news.app.server.ServerStats?, val loading: Boolean, val onRefresh: () -> Unit, val onBack: () -> Unit)
 
-private enum class SettingsPage { MAIN, SOURCES, NOTIFICATIONS, DATA, LOG, ABOUT }
+private enum class SettingsPage { MAIN, SOURCES, NOTIFICATIONS, DATA, LOG, ABOUT, USERS }
 
 /**
  * Settings, two levels. The first page holds what the owner changes: the sites (one row, with a page of switches
@@ -141,8 +142,15 @@ fun SettingsScreen(
     onRewrite: (minutes: Int?, onNewSite: Boolean?, reserveAfter: Int?) -> Unit = { _, _, _ -> },
     fullArticles: Boolean? = null,
     onFullArticles: (Boolean) -> Unit = {},
+    /** Shows a site in this user's feed (false) or hides it (true): their own choice, on the server. */
+    onSourceHidden: (id: String, hidden: Boolean) -> Unit = { _, _ -> },
+    /** The admin page's users, invite and error. */
+    adminState: AdminState = AdminState(),
+    adminActions: AdminActions = AdminActions(),
     onBack: () -> Unit,
 ) {
+    // Only the server's admins change its settings (the sites it reads, grouping, writing); the others see them read-only.
+    val admin = (server as? ServerState.Connected)?.admin == true
     var page by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
     // The news server's page (Settings › שרת החדשות) is its own screen; an enrollment link opens it from anywhere.
     if (serverPage && stats != null) {
@@ -169,6 +177,7 @@ fun SettingsScreen(
                                 SettingsPage.DATA -> "אחסון וארכיון"
                                 SettingsPage.LOG -> "יומן הרענונים"
                                 SettingsPage.ABOUT -> "אודות"
+                                SettingsPage.USERS -> "משתמשים ומכשירים"
                             },
                         )
                     },
@@ -196,23 +205,38 @@ fun SettingsScreen(
                         onRewrite = onRewrite,
                         fullArticles = fullArticles,
                         onFullArticles = onFullArticles,
-                        siteCount = serverSources?.let { list -> list.count { it.enabled } to list.size },
+                        siteCount = serverSources?.let { list -> list.count { it.enabled && !it.hidden } to list.size },
+                        admin = admin,
                         onOpenServer = { onServerPage(true) },
                         onOpen = { page = it },
                     )
                     SettingsPage.SOURCES -> if (serverSources != null) {
-                        // The server's sites: the switches change how the server reads them.
+                        // Everyone picks the sites of their own feed; only an admin changes how the server reads them.
                         Muted(
-                            "האתרים ששרת החדשות קורא; השינויים כאן נשמרים בשרת ותקפים מהקריאה הבאה שלו. אתר כבוי לא נקרא ולא מוצג. " +
-                                "לאתר עם פיד RSS אפשר לקרוא את הכותרות מהפיד. לכל אתר: כמה השרת מחכה בין בקשה לבקשה אליו.",
+                            "״בפיד שלי״: האתרים שמופיעים בפיד שלכם; הבחירה נשמרת בשרת לכל המכשירים שלכם. " +
+                                if (admin) {
+                                    "מתחת לכל אתר, איך השרת קורא אותו, לכל המשתמשים: אתר כבוי לא נקרא. לאתר עם פיד RSS אפשר לקרוא את הכותרות מהפיד, ולכל אתר נקבע כמה השרת מחכה בין בקשה לבקשה."
+                                } else {
+                                    "איך השרת קורא כל אתר מוצג לקריאה בלבד: רק מנהל השרת משנה אותו."
+                                },
                             Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                         serverSources.forEach { source ->
                             SwitchRow(
                                 title = source.name,
-                                subtitle = source.baseUrl.removePrefix("https://").removePrefix("http://").removePrefix("www."),
+                                subtitle = source.baseUrl.removePrefix("https://").removePrefix("http://").removePrefix("www.") +
+                                    if (source.enabled) " · בפיד שלי" else " · השרת לא קורא אותו",
+                                checked = source.enabled && !source.hidden,
+                                enabled = source.enabled,
+                                onChange = { on -> onSourceHidden(source.id, !on) },
+                            )
+                            SwitchRow(
+                                title = "השרת קורא את האתר",
+                                subtitle = "לכל המשתמשים",
                                 checked = source.enabled,
                                 onChange = { on -> onServerSource(source.id, on, null, null) },
+                                enabled = admin,
+                                inset = 24.dp,
                             )
                             if (source.enabled && source.hasFeed) {
                                 SwitchRow(
@@ -220,6 +244,7 @@ fun SettingsScreen(
                                     subtitle = "הכותרות מהפיד של האתר במקום מהעמודים שלו",
                                     checked = source.feed,
                                     onChange = { on -> onServerSource(source.id, null, on, null) },
+                                    enabled = admin,
                                     inset = 24.dp,
                                 )
                             }
@@ -230,12 +255,14 @@ fun SettingsScreen(
                                     selected = source.waitMs,
                                     onSelect = { ms -> onServerSource(source.id, null, null, ms) },
                                     inset = 24.dp,
+                                    enabled = admin,
                                 )
                             }
                         }
                     } else {
                         Muted("השרת לא ענה עדיין. רשימת האתרים מגיעה ממנו.", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     }
+                    SettingsPage.USERS -> AdminPage(adminState, adminActions)
                     SettingsPage.NOTIFICATIONS -> NotificationsPage(settings, sources, onChange)
                     SettingsPage.DATA -> DataPage(storage, settings, onChange, onClearCache, onChooseArchive, onStopArchive, archiveImport, onImportArchive, onArchiveNow)
                     SettingsPage.LOG -> LogPage(backgroundRuns, onClearBackgroundLog)
@@ -274,8 +301,10 @@ private fun MainPage(
     onRewrite: (minutes: Int?, onNewSite: Boolean?, reserveAfter: Int?) -> Unit = { _, _, _ -> },
     fullArticles: Boolean? = null,
     onFullArticles: (Boolean) -> Unit = {},
-    /** The server's sites, on and all; null before it answers (the ones kept on the phone are counted then). */
+    /** The server's sites in this user's feed, and all; null before it answers (the ones kept on the phone are counted then). */
     siteCount: Pair<Int, Int>?,
+    /** The user is the server's admin: its settings can be changed here, and its people managed. */
+    admin: Boolean = false,
     onOpenServer: () -> Unit,
     onOpen: (SettingsPage) -> Unit,
 ) {
@@ -285,7 +314,10 @@ private fun MainPage(
     NavRow(Icons.Filled.Dns, "שרת החדשות", serverStatus, onOpenServer)
 
     val (on, all) = siteCount ?: (sources.count { it.id !in settings.hiddenSources } to sources.size)
-    NavRow(Icons.Filled.Language, "אתרים", "$on פעילים מתוך $all · בשרת") { onOpen(SettingsPage.SOURCES) }
+    NavRow(Icons.Filled.Language, "אתרים", "$on בפיד שלי מתוך $all") { onOpen(SettingsPage.SOURCES) }
+    if (admin) {
+        NavRow(Icons.Filled.Group, "משתמשים ומכשירים", "הזמנה, תפקידים, ביטול מכשירים · מנהל") { onOpen(SettingsPage.USERS) }
+    }
 
     Section("כותרות")
     SwitchRow(
@@ -391,6 +423,9 @@ private fun MainPage(
         selected = settings.sourceLabels,
         onSelect = { onChange(settings.copy(sourceLabels = it)) },
     )
+    if (!admin && (storyLength != null || rewrite != null || fullArticles != null || serverGrouping != null)) {
+        Muted("הגדרות הכתיבה והקיבוץ של השרת מוצגות לקריאה בלבד: רק מנהל השרת משנה אותן.", Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+    }
     if (storyLength != null) {
         ChoiceRow(
             title = "אורך כתבה",
@@ -398,6 +433,7 @@ private fun MainPage(
             options = listOf("SHORT" to "קצר", "MEDIUM" to "בינוני", "LONG" to "ארוך", "FULL" to "מלא"),
             selected = storyLength,
             onSelect = onStoryLength,
+            enabled = admin,
         )
     }
     if (rewrite != null) {
@@ -407,12 +443,14 @@ private fun MainPage(
             options = (listOf(0, 30, 60) + rewrite.minutes).distinct().map { it to if (it == 0) "תמיד" else "כל $it דק׳" },
             selected = rewrite.minutes,
             onSelect = { onRewrite(it, null, null) },
+            enabled = admin,
         )
         SwitchRow(
             title = "אתר חדש כותב מיד",
             subtitle = "אתר שעוד לא היה בסיפור כותב אותו מחדש מיד, בלי לחכות. כבוי חוסך את רוב הבקשות: רוב הכתיבות מחדש הן אתרים שמצטרפים.",
             checked = rewrite.onNewSite,
             onChange = { onRewrite(null, it, null) },
+            enabled = admin,
         )
         ChoiceRow(
             title = "שמירת רזרבה",
@@ -420,6 +458,7 @@ private fun MainPage(
             options = (listOf(0, 300, 350) + rewrite.reserveAfter).distinct().map { it to if (it == 0) "כבוי" else "אחרי $it בקשות ביום" },
             selected = rewrite.reserveAfter,
             onSelect = { onRewrite(null, null, it) },
+            enabled = admin,
         )
     }
     if (fullArticles != null) {
@@ -428,6 +467,7 @@ private fun MainPage(
             subtitle = "כותרת, כותרת משנה וגוף הכתבה המלא, מנוקה. כבוי: 600 התווים הראשונים.",
             checked = fullArticles,
             onChange = onFullArticles,
+            enabled = admin,
         )
     }
     ChoiceRow(
@@ -454,6 +494,7 @@ private fun MainPage(
                 options = listOf(false to "מודל", true to "Gemini"),
                 selected = serverGrouping.byGemini,
                 onSelect = onServerGroupingMethod,
+                enabled = admin,
             )
         }
         InfoRow("מודל", "${serverGrouping.model} · בשרת (נקבע בהגדרות השרת)")
@@ -465,13 +506,14 @@ private fun MainPage(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
-            StrictnessRow(serverGrouping.strictness) { onServerGrouping(it, null, null) }
+            StrictnessRow(serverGrouping.strictness, enabled = admin) { onServerGrouping(it, null, null) }
             ChoiceRow(
                 title = "השוואה לפי",
                 subtitle = storyTextNote(serverGrouping.text) + " בשרת.",
                 options = STORY_TEXT_CHOICES,
                 selected = serverGrouping.text,
                 onSelect = { onServerGrouping(null, it, null) },
+                enabled = admin,
             )
         }
         ChoiceRow(
@@ -480,6 +522,7 @@ private fun MainPage(
             options = (STORY_DAYS_CHOICES + serverGrouping.days).distinct().map { it to if (it == 0) "הכל" else if (it == 1) "יום" else "$it ימים" },
             selected = serverGrouping.days,
             onSelect = { onServerGrouping(null, null, it) },
+            enabled = admin,
         )
     } else {
         InfoRow("קיבוץ", "השרת לא מקבץ סיפורים, או שעוד לא ענה")
@@ -784,11 +827,13 @@ private fun <T> ChoiceRow(
     onSelect: (T) -> Unit,
     subtitle: String? = null,
     inset: Dp = 0.dp,
+    /** False: shown read-only (dimmed, no sheet). */
+    enabled: Boolean = true,
 ) {
     var open by remember { mutableStateOf(false) }
     val current = options.firstOrNull { it.first == selected }?.second.orEmpty()
     Row(
-        Modifier.fillMaxWidth().clickable { open = true }.padding(start = 16.dp + inset, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.6f).clickable(enabled = enabled) { open = true }.padding(start = 16.dp + inset, end = 12.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -840,7 +885,7 @@ private fun InfoRow(title: String, value: String) {
  * lower brings in related coverage too. The stories are found again once the thumb is let go, not while it moves.
  */
 @Composable
-private fun StrictnessRow(value: Int, onChange: (Int) -> Unit) {
+private fun StrictnessRow(value: Int, enabled: Boolean = true, onChange: (Int) -> Unit) {
     var moving by remember(value) { mutableFloatStateOf(value.toFloat()) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -852,6 +897,7 @@ private fun StrictnessRow(value: Int, onChange: (Int) -> Unit) {
             value = moving,
             onValueChange = { moving = it },
             onValueChangeFinished = { onChange(moving.roundToInt()) },
+            enabled = enabled,
             valueRange = STRICTNESS_MIN.toFloat()..STRICTNESS_MAX.toFloat(),
             steps = (STRICTNESS_MAX - STRICTNESS_MIN) / STRICTNESS_STEP - 1,
         )

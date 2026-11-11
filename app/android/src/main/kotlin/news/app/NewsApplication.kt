@@ -80,6 +80,16 @@ class NewsApplication : Application(), SingletonImageLoader.Factory {
         ).also { it.keepWritingIn(File(filesDir, "server-writing.json")) }
     }
 
+    /** The read marks, the same on all the user's devices through the server ([ReadSync]). */
+    val readSync by lazy {
+        ReadSync(
+            File(filesDir, ReadSync.OUTBOX_FILE),
+            File(filesDir, ReadSync.SINCE_FILE),
+            send = { urls -> server.markRead(urls) },
+            fetch = { since -> server.readArticles(since) },
+        )
+    }
+
     /** The phone's name for the server's device list: its own name when set (Android 7.1+), else its model. */
     private fun deviceName(): String =
         runCatching { android.provider.Settings.Global.getString(contentResolver, android.provider.Settings.Global.DEVICE_NAME) }.getOrNull()
@@ -129,16 +139,17 @@ class NewsApplication : Application(), SingletonImageLoader.Factory {
             videoQueue.clear()
             for (line in queued) {
                 coroutineContext.ensureActive()
-                val (url, stream, hls) = line.split('\t').takeIf { it.size == 3 } ?: continue
+                // An article's URL (lines from before held its stream and kind after it, tab-separated).
+                val url = line.substringBefore('\t')
                 val article = repository.savedArticle(url) ?: archive.load(url) ?: continue
-                runCatching { exportVideo(archive, article, ResolvedStream(stream, hls.toBoolean())) }
+                runCatching { exportVideo(archive, article) }
             }
         } finally {
             archive.flush()
         }
     }
 
-    /** The videos played since the last [archiveFromCache], to be archived by it: "<article url>\t<stream>\t<hls>". */
+    /** The articles whose video played since the last [archiveFromCache], to be archived by it: their URLs. */
     private val videoQueue by lazy { ReadHistory(File(filesDir, "archive-videos.txt")) }
 
     /** [url]'s picture from the picture cache, or null when the app hasn't downloaded it. Blocking. */
@@ -159,21 +170,20 @@ class NewsApplication : Application(), SingletonImageLoader.Factory {
     }
 
     /**
-     * Reads media through [videoCache]: from the web with a browser's User-Agent (some CDNs refuse the default
-     * one), or from the archive's files (content://).
+     * Reads media through [videoCache]: from the news server with [server]'s client ([NewsServer.mediaClient]: the
+     * phone's certificate, the pinned server key), or from the archive's files (content://) without one.
      */
-    fun videoDataSourceFactory(): DataSource.Factory =
+    fun videoDataSourceFactory(server: okhttp3.OkHttpClient? = null): DataSource.Factory =
         CacheDataSource.Factory()
             .setCache(videoCache)
             .setUpstreamDataSourceFactory(
                 DefaultDataSource.Factory(
                     this,
-                    DefaultHttpDataSource.Factory().setUserAgent(MEDIA_USER_AGENT).setAllowCrossProtocolRedirects(true),
+                    server?.let { androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(it) }
+                        ?: DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true),
                 ),
             )
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-
-    private fun videoMediaSourceFactory(): MediaSource.Factory = DefaultMediaSourceFactory(videoDataSourceFactory())
 
     /** [article]'s video as archived (its MP4 file), or null. Looks in the archive folder: call off the main thread. */
     fun archivedVideo(article: Article): String? = archive?.videoFile(article.url)?.toString()
@@ -221,29 +231,37 @@ class NewsApplication : Application(), SingletonImageLoader.Factory {
     }
 
     /**
-     * [article]'s [stream] played: queued for the day's archiving ([archiveFromCache]), which copies it into the archive
-     * as one highest-res MP4 ([exportVideo]), when a folder is set and it isn't there yet. For an HLS stream the highest
-     * rendition is exported; a progressive file is muxed as is. Nothing is queued when not archiving.
+     * [article]'s video played through the server: queued for the day's archiving ([archiveFromCache]), which copies it
+     * into the archive as one highest-res MP4 ([exportVideo]), when a folder is set and it isn't there yet. Nothing is
+     * queued when not archiving.
      */
-    fun archiveVideo(article: Article, stream: ResolvedStream) {
+    fun archiveVideo(article: Article) {
         val archive = archive ?: return
         scope.launch {
-            runCatching { if (!archive.hasVideo(article.url)) videoQueue.add("${article.url}\t${stream.url}\t${stream.isHls}") }
+            runCatching { if (!archive.hasVideo(article.url)) videoQueue.add(article.url) }
         }
     }
 
-    /** Copies [article]'s [stream] into [archive] as one highest-res MP4, unless it is there ([archiveVideo]). */
-    private suspend fun exportVideo(archive: ArticleArchive, article: Article, stream: ResolvedStream) {
+    /**
+     * Copies [article]'s video into [archive] as one highest-res MP4, unless it is there ([archiveVideo]): from the
+     * server's stream, asked for again (its paths last hours), with the phone's certificate. For HLS the highest
+     * rendition is exported; an MP4 is muxed as is.
+     */
+    private suspend fun exportVideo(archive: ArticleArchive, article: Article) {
         if (archive.hasVideo(article.url)) return
-        val source = if (stream.isHls) {
-            val master = runCatching { java.net.URL(stream.url).openConnection().apply { setRequestProperty("User-Agent", MEDIA_USER_AGENT) }.getInputStream().use { it.readBytes().decodeToString() } }.getOrNull()
+        val stream = server.videoStream(article.url) ?: return
+        val client = server.mediaClient() ?: return
+        val source = if (stream.hls) {
+            val master = runCatching {
+                client.newCall(okhttp3.Request.Builder().url(stream.url).build()).execute().use { it.body.string() }
+            }.getOrNull()
             master?.let { highestHlsVariant(it, stream.url) } ?: stream.url
         } else {
             stream.url
         }
         val temp = File(cacheDir, "archive-video-${FeedCache.fileName(article.url).removeSuffix(".json")}.mp4")
         try {
-            if (exportMp4(this@NewsApplication, videoMediaSourceFactory(), source, temp)) archive.saveVideo(article, temp)
+            if (exportMp4(this@NewsApplication, DefaultMediaSourceFactory(videoDataSourceFactory(client)), source, temp)) archive.saveVideo(article, temp)
         } finally {
             temp.delete()
         }

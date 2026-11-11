@@ -152,6 +152,7 @@ fun NewsApp(
     val server by vm.server.collectAsStateWithLifecycle()
     val serverPage by vm.serverPage.collectAsStateWithLifecycle()
     val serverSources by vm.serverSources.collectAsStateWithLifecycle()
+    val adminState by vm.admin.collectAsStateWithLifecycle()
     val serverGrouping by vm.serverGrouping.collectAsStateWithLifecycle()
     val fullArticles by vm.fullArticles.collectAsStateWithLifecycle()
     val storyLength by vm.storyLength.collectAsStateWithLifecycle()
@@ -257,6 +258,16 @@ fun NewsApp(
             onStoryLength = vm::setStoryLength,
             onFullArticles = vm::setFullArticles,
             onServerPage = vm::showServerPage,
+            onSourceHidden = vm::setSourceHidden,
+            adminState = adminState,
+            adminActions = AdminActions(
+                load = vm::loadUsers,
+                invite = vm::createInvite,
+                dismissInvite = vm::dismissInvite,
+                setRole = vm::setUserRole,
+                revoke = vm::revokeDevice,
+                remove = vm::removeUser,
+            ),
             onBack = vm::closeSettings,
         )
     } else {

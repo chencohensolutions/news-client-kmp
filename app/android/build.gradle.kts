@@ -83,6 +83,10 @@ dependencies {
     implementation(libs.media3.database)
     implementation(libs.media3.transformer)
     implementation(libs.media3.muxer)
+    // The server's video through OkHttp: the phone's certificate and the pinned server key on every media request.
+    implementation(libs.media3.datasource.okhttp)
+    // The invite's QR code (Settings › משתמשים).
+    implementation(libs.zxing.core)
 
     // The news server (news-server-go): GraphQL over mutual TLS, and Google's code scanner for its enrollment QR code.
     implementation(libs.apollo.runtime)
