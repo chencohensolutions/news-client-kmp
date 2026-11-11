@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the UI lab (UiLabActivity, docs/ui-lab.md), reachable with `adb shell am start` but without a
+     launcher icon, so the debug app shows one launcher icon. The uiLab build type adds it. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Turning the phone keeps the screen as MainActivity's does (a wide video's full screen turns it), rather than
+             starting it again from its option list's state. -->
+        <activity
+            android:name=".lab.UiLabActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:label="News Client UI lab" />
+    </application>
+</manifest>
