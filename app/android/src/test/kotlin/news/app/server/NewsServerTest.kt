@@ -42,7 +42,11 @@ class NewsServerTest {
         }
 
         override suspend fun preview(code: String): PreviewResult {
-            calls += "preview $code"
+            calls += if (otherKeyAt.isEmpty()) "preview $code" else "preview $code $url"
+            // Another machine behind this address (another server's key): the pin refuses it in the handshake.
+            if (url in otherKeyAt) {
+                trust.checkServerTrusted(arrayOf(otherCertificate()), "ECDHE_ECDSA")
+            }
             // The TLS handshake: the server shows its certificate to whatever trusts it.
             trust.checkServerTrusted(arrayOf(testCertificate()), "ECDHE_ECDSA")
             return if (code == "EXPIRED") PreviewResult.Rejected(EnrollmentRejectedReason.INVALID_CODE) else PreviewResult.Valid("reader", now + 10.minutes)
@@ -140,6 +144,41 @@ class NewsServerTest {
     }
 
     private var role = UserRole.USER
+    private var otherKeyAt: Set<String> = emptySet()
+
+    /** A certificate with another key than [fingerprint]'s: another server. */
+    private fun otherCertificate(): java.security.cert.X509Certificate {
+        val other = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val real = testCertificate()
+        return object : java.security.cert.X509Certificate() {
+            override fun getPublicKey() = other.public
+            override fun getEncoded(): ByteArray = real.encoded
+            override fun checkValidity() = Unit
+            override fun checkValidity(date: java.util.Date?) = Unit
+            override fun getVersion() = 3
+            override fun getSerialNumber() = real.serialNumber
+            @Deprecated("") override fun getIssuerDN() = real.issuerDN
+            @Deprecated("") override fun getSubjectDN() = real.subjectDN
+            override fun getNotBefore() = real.notBefore
+            override fun getNotAfter() = real.notAfter
+            override fun getTBSCertificate(): ByteArray = real.tbsCertificate
+            override fun getSignature(): ByteArray = real.signature
+            override fun getSigAlgName(): String = real.sigAlgName
+            override fun getSigAlgOID(): String = real.sigAlgOID
+            override fun getSigAlgParams(): ByteArray? = real.sigAlgParams
+            override fun getIssuerUniqueID(): BooleanArray? = null
+            override fun getSubjectUniqueID(): BooleanArray? = null
+            override fun getKeyUsage(): BooleanArray? = null
+            override fun getBasicConstraints() = -1
+            override fun verify(key: java.security.PublicKey?) = Unit
+            override fun verify(key: java.security.PublicKey?, sigProvider: String?) = Unit
+            override fun toString() = "other"
+            override fun hasUnsupportedCriticalExtension() = false
+            override fun getCriticalExtensionOIDs(): MutableSet<String>? = null
+            override fun getNonCriticalExtensionOIDs(): MutableSet<String>? = null
+            override fun getExtensionValue(oid: String?): ByteArray? = null
+        }
+    }
     private var meError: Exception? = null
     private var video: VideoPath? = null
 
@@ -178,7 +217,10 @@ class NewsServerTest {
             }
         }
 
+        var saveFails: Exception? = null
+
         override fun saveCertificate(alias: String, certificateDer: ByteArray) {
+            saveFails?.let { throw it }
             certificates[alias] = certificateDer
         }
 
@@ -586,5 +628,58 @@ class NewsServerTest {
     fun videoUrlJoinsBaseAndPath() {
         assertEquals("https://h.example:1/video/t/file", videoUrl("https://h.example:1/", "/video/t/file"))
         assertEquals("https://h.example:1/video/t/file", videoUrl("https://h.example:1", "video/t/file"))
+    }
+
+    // --- Enrolling from a link whose outside address leads elsewhere ---
+
+    @Test
+    fun aLinkWhoseServerShowsAnotherKeyEnrollsAtItsHomeAddress() = runTest {
+        // The router forwards the outside port to another machine: from inside the home, only the home address works.
+        otherKeyAt = setOf("https://203.0.113.7:56399")
+        val server = server()
+        server.enroll(EnrollmentLink("K7QM-3XRP", "https://203.0.113.7:56399", fingerprint, addresses = listOf("https://203.0.113.7:56399", "https://192.168.50.2:56399")))
+        advanceUntilIdle()
+        val state = assertIs<ServerState.Connected>(server.state.value)
+        assertEquals("192.168.50.2", state.address)
+        val account = assertNotNull(store.account)
+        assertEquals("https://192.168.50.2:56399", account.url)
+        // The outside address is kept for away from home.
+        assertTrue("https://203.0.113.7:56399" in account.addresses)
+        assertEquals(1, calls.count { it.startsWith("enroll") })
+    }
+
+    @Test
+    fun onlyAnotherKeyAnywhereSaysWrongKeyNotUnreachable() = runTest {
+        otherKeyAt = setOf("https://203.0.113.7:56399")
+        val server = server()
+        server.enroll(EnrollmentLink("K7QM-3XRP", "https://203.0.113.7:56399", fingerprint))
+        advanceUntilIdle()
+        assertEquals(ServerError.WRONG_KEY, assertIs<ServerState.NotConnected>(server.state.value).error)
+    }
+
+    @Test
+    fun aWrongKeyInsideApollosNetworkErrorIsAWrongKey() {
+        val e = com.apollographql.apollo.exception.ApolloNetworkException("Failed", javax.net.ssl.SSLHandshakeException("handshake").apply { initCause(WrongServerKeyException()) })
+        assertEquals(ServerError.WRONG_KEY, errorOf(e))
+    }
+
+    @Test
+    fun aCertificateThePhoneCouldntKeepSaysSoAndTheCodeIsntSentAgain() = runTest {
+        keys.saveFails = IllegalStateException("Keystore said no")
+        val server = server()
+        val link = EnrollmentLink("K7QM-3XRP", "192.168.50.2", fingerprint)
+        server.enroll(link)
+        advanceUntilIdle()
+        val failed = assertIs<ServerState.NotConnected>(server.state.value)
+        assertEquals(ServerError.SAVE_FAILED, failed.error)
+        assertEquals("Keystore said no", failed.detail)
+        assertTrue(keys.keys.isEmpty())
+        // The server took the code: the phone doesn't send it again, and says why.
+        keys.saveFails = null
+        calls.clear()
+        server.enroll(link)
+        advanceUntilIdle()
+        assertEquals(ServerError.CODE_USED, assertIs<ServerState.NotConnected>(server.state.value).error)
+        assertTrue(calls.isEmpty())
     }
 }

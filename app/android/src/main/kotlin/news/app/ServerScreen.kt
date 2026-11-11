@@ -97,7 +97,7 @@ fun ServerScreen(state: ServerState, actions: ServerActions, canGoBack: Boolean 
         ) { padding ->
             Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
                 when (state) {
-                    is ServerState.NotConnected -> Enroll(state.address, state.code, state.error, connecting = false, user = null, actions)
+                    is ServerState.NotConnected -> Enroll(state.address, state.code, state.error, connecting = false, user = null, actions, detail = state.detail)
                     is ServerState.Connecting -> Enroll(state.address, state.code, null, connecting = true, user = state.user, actions)
                     is ServerState.ConfirmKey -> ConfirmKeyPage(state, actions)
                     is ServerState.Connected -> ConnectedPage(state, actions)
@@ -109,7 +109,7 @@ fun ServerScreen(state: ServerState, actions: ServerActions, canGoBack: Boolean 
 }
 
 @Composable
-private fun Enroll(address: String, code: String, error: ServerError?, connecting: Boolean, user: String?, actions: ServerActions) {
+private fun Enroll(address: String, code: String, error: ServerError?, connecting: Boolean, user: String?, actions: ServerActions, detail: String? = null) {
     Muted(
         "האפליקציה מציגה את החדשות משרת החדשות שלכם: הוא אוסף את הכותרות והכתבות, מקבץ את הסיפורים " +
             "וכותב את הסיכומים. חברו את הטלפון לשרת כדי להתחיל.",
@@ -171,11 +171,13 @@ private fun Enroll(address: String, code: String, error: ServerError?, connectin
                     ServerError.CODE_EXPIRED -> "הקוד לא תקף: פג תוקפו או שכבר השתמשו בו. צרו קוד חדש בשרת."
                     ServerError.RATE_LIMITED -> "יותר מדי קודים שגויים. חכו דקה ונסו שוב."
                     ServerError.FAILED -> "החיבור נכשל. נסו שוב, או צרו קוד חדש."
+                    ServerError.CODE_USED -> "הקוד הזה כבר נשלח לשרת מהטלפון, והשרת לא יקבל אותו שוב. צרו קוד חדש."
+                    ServerError.SAVE_FAILED -> "השרת רשם את הטלפון, אבל שמירת התעודה בטלפון נכשלה: ${detail.orEmpty()}. צרו קוד חדש ונסו שוב."
                     else -> "8 אותיות וספרות. עובד פעם אחת, ל־10 דקות."
                 },
             )
         },
-        isError = error == ServerError.CODE_EXPIRED || error == ServerError.RATE_LIMITED || error == ServerError.FAILED,
+        isError = error in setOf(ServerError.CODE_EXPIRED, ServerError.RATE_LIMITED, ServerError.FAILED, ServerError.CODE_USED, ServerError.SAVE_FAILED),
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
     )

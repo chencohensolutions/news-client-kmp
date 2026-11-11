@@ -176,14 +176,24 @@ class NewsServer(
             return
         }
         val shown = displayAddress(url)
+        // A code goes to enrollDevice once: the server takes it then, even if the phone failed after.
+        if (code.trim().uppercase() in sentCodes) {
+            _state.value = ServerState.NotConnected(shown, code, ServerError.CODE_USED)
+            return
+        }
         job?.cancel()
         job = scope.launch {
             _state.value = ServerState.Connecting(shown, code)
             try {
                 if (fingerprint != null) {
-                    val preview = apiFor(url, PinnedTrustManager(fingerprint), null).preview(code)
-                    val user = (preview as? PreviewResult.Valid)?.user ?: return@launch reject(shown, code, (preview as PreviewResult.Rejected).reason)
-                    finish(Pending(url, code, fingerprint, user, link?.key, link?.addresses.orEmpty()))
+                    // The link's server, then each of its addresses: the first that shows the pinned key and answers. An
+                    // outside address may lead elsewhere from inside the home (a router forwarding the port to another
+                    // machine), where the home address works.
+                    val candidates = (listOf(url) + link?.addresses.orEmpty().mapNotNull(ServerAddresses::originOf)).distinct()
+                    val (at, preview) = previewAt(candidates, fingerprint, code)
+                    val shownAt = displayAddress(at)
+                    val user = (preview as? PreviewResult.Valid)?.user ?: return@launch reject(shownAt, code, (preview as PreviewResult.Rejected).reason)
+                    finish(Pending(at, code, fingerprint, user, link?.key, (listOf(url) + link?.addresses.orEmpty()).filter { it != at }))
                 } else {
                     // Nothing to check the server against yet: only the code goes out, and the key that came back is shown.
                     val seeing = KeySeeingTrustManager()
@@ -200,6 +210,33 @@ class NewsServer(
             }
         }
     }
+
+    /**
+     * Asks enrollmentPreview at [candidates], the next [stagger] after the one before, with [fingerprint] pinned: the
+     * first that answers, and its answer. None answering throws the most telling failure: a wrong key, else the first's.
+     */
+    private suspend fun previewAt(candidates: List<String>, fingerprint: String, code: String): Pair<String, PreviewResult> {
+        val answers = java.util.concurrent.ConcurrentHashMap<String, PreviewResult>()
+        val failures = java.util.concurrent.ConcurrentHashMap<String, Exception>()
+        val at = firstToAnswer(candidates, stagger) { origin ->
+            try {
+                answers[origin] = apiFor(origin, PinnedTrustManager(fingerprint), null).preview(code)
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failures[origin] = e
+                false
+            }
+        }
+        if (at != null) return at to answers.getValue(at)
+        throw candidates.firstNotNullOfOrNull { failures[it]?.takeIf { e -> errorOf(e) == ServerError.WRONG_KEY } }
+            ?: candidates.firstNotNullOfOrNull { failures[it] }
+            ?: IOException("No answer")
+    }
+
+    /** The codes this phone sent to enrollDevice (upper case): the server took each, whatever happened next. */
+    private val sentCodes = HashSet<String>()
 
     /** The owner compared the key with what `enroll-code` printed: enrolls with it pinned. */
     fun confirmKey() {
@@ -238,6 +275,7 @@ class NewsServer(
             val key = keys.generate(alias)
             key to CertificateRequest.build(deviceName, key.publicKeyInfo, key::sign)
         }
+        sentCodes += enrolling.code.trim().uppercase()
         val answer = try {
             apiFor(enrolling.url, PinnedTrustManager(enrolling.fingerprint), null).enroll(enrolling.code, deviceName, csr, key.protection)
         } catch (e: Exception) {
@@ -250,7 +288,17 @@ class NewsServer(
                 reject(shown, enrolling.code, answer.reason)
             }
             is EnrollResult.Enrolled -> {
-                withContext(io) { keys.saveCertificate(alias, answer.certificate) }
+                // The server enrolled the phone and took the code: a failure keeping the certificate here is the phone's,
+                // and says what it was, not that the code is wrong.
+                try {
+                    withContext(io) { keys.saveCertificate(alias, answer.certificate) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    withContext(io) { runCatching { keys.delete(alias) } }
+                    _state.value = ServerState.NotConnected(shown, enrolling.code, ServerError.SAVE_FAILED, e.message ?: e.javaClass.simpleName)
+                    return
+                }
                 val enrolled = ServerAccount(
                     url = enrolling.url,
                     fingerprint = enrolling.fingerprint,
@@ -915,9 +963,14 @@ internal fun videoUrl(base: String, path: String): String = base.trimEnd('/') + 
 
 /** What went wrong, as the server screen tells it. */
 internal fun errorOf(e: Throwable): ServerError {
+    // A refused key first: it comes wrapped in network exceptions (Apollo's, then the TLS handshake's).
+    var wrapped: Throwable? = e
+    while (wrapped != null) {
+        if (wrapped is WrongServerKeyException) return ServerError.WRONG_KEY
+        wrapped = wrapped.cause
+    }
     var cause: Throwable? = e
     while (cause != null) {
-        if (cause is WrongServerKeyException) return ServerError.WRONG_KEY
         if (cause is IOException || cause.javaClass.name.startsWith("com.apollographql.apollo.exception.ApolloNetwork")) return ServerError.UNREACHABLE
         cause = cause.cause
     }

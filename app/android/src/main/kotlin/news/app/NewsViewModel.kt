@@ -409,7 +409,13 @@ sealed interface ArticleState {
  */
 sealed interface ServerState {
     /** No certificate: the app shows only the connect screen. [error] is why the last try failed. */
-    data class NotConnected(val address: String = "", val code: String = "", val error: ServerError? = null) : ServerState
+    data class NotConnected(
+        val address: String = "",
+        val code: String = "",
+        val error: ServerError? = null,
+        /** What failed on the phone, for [ServerError.SAVE_FAILED]. */
+        val detail: String? = null,
+    ) : ServerState
 
     /** enrollmentPreview, the key in the Keystore, enrollDevice, then serverInfo. [user] once the code is checked. */
     data class Connecting(val address: String, val code: String, val user: String? = null) : ServerState
@@ -469,6 +475,12 @@ internal fun feedHidden(local: Set<String>, server: List<ServerSource>): Set<Str
 }
 
 enum class ServerError {
+    /** This phone already sent the code to enrollDevice: the server took it, so it doesn't work again. */
+    CODE_USED,
+
+    /** The server enrolled the phone, but keeping its certificate on the phone failed ([ServerState.NotConnected.detail]). */
+    SAVE_FAILED,
+
     /** EnrollmentRejected INVALID_CODE: wrong, expired or already used. */
     CODE_EXPIRED,
 
