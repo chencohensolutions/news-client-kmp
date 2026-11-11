@@ -34,7 +34,7 @@ waits for the boot. `WINDOW=1` shows its window.
 ```sh
 ./gradlew :app:android:testDebugUnitTest   # unit tests
 ./gradlew :app:android:assembleDebug       # the app: news.client (the UI lab app: assembleUiLab, news.client.uilab)
-./gradlew :app:android:syncServerSchema    # the server's schema, from ../news-server-go or -PnewsServerDir=<path>
+./gradlew :app:android:syncServerSchema    # the server's schema, from ../news-server-core-go or -PnewsServerDir=<path>
 ```
 
 Against a local server on the emulator: [docs/news-server.md](docs/news-server.md#trying-it-against-a-local-server).

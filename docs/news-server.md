@@ -82,7 +82,7 @@ When the server doesn't answer, the feed stays as it was, its title line says "×
 `app/android/src/main/graphql/*.graphqls` is the server's `graph/schema/*.graphql` (news-server-go, or news-server-core-go with `-PnewsServerDir`), copied:
 
 ```bash
-./gradlew :app:android:syncServerSchema    # from ../news-server-go, or -PnewsServerDir=<path>
+./gradlew :app:android:syncServerSchema    # from ../news-server-core-go, or -PnewsServerDir=<path>
 ```
 
 The app's operations are in `Operations.graphql` beside it.

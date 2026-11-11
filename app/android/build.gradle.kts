@@ -110,11 +110,11 @@ apollo {
 }
 
 // Copies news-server-go's schema into src/main/graphql. The server checkout: -PnewsServerDir=<path>, else the sibling
-// ../news-server-go. Apollo only reads *.graphqls as schema, so they are renamed.
-val newsServerSchemaDir: File = rootProject.file((findProperty("newsServerDir") as String? ?: "../news-server-go") + "/graph/schema")
+// ../news-server-core-go. Apollo only reads *.graphqls as schema, so they are renamed.
+val newsServerSchemaDir: File = rootProject.file((findProperty("newsServerDir") as String? ?: "../news-server-core-go") + "/graph/schema")
 val checkServerSchemaDir = tasks.register("checkServerSchemaDir") {
     val dir = newsServerSchemaDir
-    doLast { if (!dir.isDirectory) throw GradleException("Server schema not found at $dir. Pass -PnewsServerDir=<path to news-server-go>.") }
+    doLast { if (!dir.isDirectory) throw GradleException("Server schema not found at $dir. Pass -PnewsServerDir=<path to the news server checkout>.") }
 }
 tasks.register<Copy>("syncServerSchema") {
     group = "apollo"
