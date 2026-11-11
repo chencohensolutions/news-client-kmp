@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The UI Lab app's icon is News's in amber, to tell the two apart. -->
+    <color name="ic_launcher_background">#FF854F0B</color>
+</resources>

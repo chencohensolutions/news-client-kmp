@@ -1,0 +1,334 @@
+# What the app asks the news server (news-server-go). The schema next to it is the server's, copied by
+# ./gradlew :app:android:syncServerSchema.
+
+# --- Enrollment (no certificate yet: @public) ---------------------------------------------------------------------
+
+query EnrollmentPreview($code: String!) {
+  enrollmentPreview(code: $code) {
+    __typename
+    ... on EnrollmentPreview {
+      user
+      expiresAt
+    }
+    ... on EnrollmentRejected {
+      reason
+    }
+  }
+}
+
+mutation EnrollDevice($input: EnrollDeviceInput!) {
+  enrollDevice(input: $input) {
+    ...Enrollment
+  }
+}
+
+# A new certificate for a new key, asked with the current one in its last 30 days.
+mutation RenewCertificate($csr: String!, $keyProtection: KeyProtection!) {
+  renewCertificate(csr: $csr, keyProtection: $keyProtection) {
+    ...Enrollment
+  }
+}
+
+fragment Enrollment on EnrollDeviceResult {
+  __typename
+  ... on EnrolledDevice {
+    user
+    deviceName
+    certificate
+    serial
+    expiresAt
+  }
+  ... on EnrollmentRejected {
+    reason
+  }
+}
+
+# --- With the client certificate ----------------------------------------------------------------------------------
+
+query ServerInfo {
+  serverInfo {
+    api
+    version
+    renewCertificates
+    stories
+    summaries
+    discovery {
+      fingerprint
+      id
+      key
+      addresses
+    }
+  }
+}
+
+query Headlines($since: Time, $sourceIds: [String!]) {
+  headlines(since: $since, sourceIds: $sourceIds) {
+    ...ServerHeadline
+  }
+}
+
+query Articles($urls: [String!]!) {
+  articles(urls: $urls) {
+    ...ServerArticle
+  }
+}
+
+query Stories {
+  stories {
+    groupedAt
+    stories {
+      reports {
+        url
+      }
+      summary {
+        title
+        sentences {
+          ...ServerSentence
+        }
+        contradictions {
+          ...ServerSentence
+        }
+        unrelated
+        reports
+        headlineOnly
+        writtenAt
+        writtenWith {
+          fullArticles
+          length
+        }
+        id
+        threads {
+          ...ServerThreadRef
+        }
+      }
+    }
+  }
+}
+
+# A thread as a story's card or a related thread names it.
+fragment ServerThreadRef on Thread {
+  id
+  name
+  storyCount
+  startedAt
+  updatedAt
+}
+
+# One thread with its stories and related threads: its page, asked for when it opens.
+query Thread($id: ID!) {
+  thread(id: $id) {
+    ...ServerThreadRef
+    summary
+    stories {
+      id
+      title
+      sentences {
+        ...ServerSentence
+      }
+      firstWrittenAt
+      writtenAt
+      firstReportAt
+      lastReportAt
+    }
+    related {
+      ...ServerThreadRef
+    }
+  }
+}
+
+fragment ServerSentence on Sentence {
+  text
+  footnotes {
+    url
+    sourceId
+    title
+    video
+    publishedAt
+  }
+}
+
+fragment ServerHeadline on Headline {
+  sourceId
+  url
+  title
+  summary
+  imageUrl
+  publishedAt
+  category
+  subtitle
+  video
+  firstSeen
+  lastSeen
+}
+
+fragment ServerArticle on Article {
+  sourceId
+  url
+  title
+  subtitle
+  author
+  publishedAt
+  imageUrl
+  category
+  body
+  blocks {
+    type
+    text
+    url
+    caption
+  }
+  video {
+    poster
+    stream
+    embed
+    duration
+  }
+}
+
+# The sites the server reads and its settings for each (Settings › אתרים, with the server on).
+query Sources {
+  sources {
+    ...ServerSourceFields
+  }
+}
+
+# One site's settings on the server; the fields left out keep their value.
+mutation SetSource($id: String!, $enabled: Boolean, $feed: Boolean, $waitMs: Int) {
+  setSource(id: $id, enabled: $enabled, feed: $feed, waitMs: $waitMs) {
+    ...ServerSourceFields
+  }
+}
+
+fragment ServerSourceFields on Source {
+  id
+  name
+  baseUrl
+  language
+  enabled
+  hasFeed
+  feed
+  waitMs
+}
+
+# What the server has done (Settings › שרת החדשות › סטטיסטיקה).
+query Stats {
+  stats {
+    headlines
+    articles
+    stories
+    groupedAt
+    summaries
+    gemini {
+      model
+      budget
+      today
+      days {
+        day
+        requests
+        tokensIn
+        tokensCached
+        tokensOut
+        tokensThinking
+      }
+      lastRun {
+        at
+        written
+        waiting
+        error
+      }
+    }
+    lastLoop {
+      startedAt
+      everyMinutes
+      readSeconds
+      headlines
+      newArticles
+      failedSites
+      groupSeconds
+      summarySeconds
+      totalSeconds
+    }
+    sites {
+      sourceId
+      enabled
+      lastRunAt
+      lastOkAt
+      headlines
+      error
+    }
+  }
+}
+
+# How the server groups stories (Settings › סיפורים, with the server on).
+query Grouping {
+  grouping {
+    ...ServerGroupingFields
+  }
+}
+
+mutation SetGrouping($strictness: Int, $text: StoryText, $days: Int, $method: GroupingMethod) {
+  setGrouping(strictness: $strictness, text: $text, days: $days, method: $method) {
+    ...ServerGroupingFields
+  }
+}
+
+fragment ServerGroupingFields on Grouping {
+  method
+  geminiAvailable
+  model
+  text
+  strictness
+  days
+  threshold
+}
+
+# How the summaries are written (Settings › סיפורים): whether Gemini reads the full articles; null with summaries off.
+query SummarySettings {
+  summarySettings {
+    fullArticles
+    length
+    rewriteMinutes
+    rewriteOnNewSite
+    reserveAfter
+  }
+}
+
+mutation SetSummarySettings($fullArticles: Boolean, $length: StoryLength, $rewriteMinutes: Int, $rewriteOnNewSite: Boolean, $reserveAfter: Int) {
+  setSummarySettings(fullArticles: $fullArticles, length: $length, rewriteMinutes: $rewriteMinutes, rewriteOnNewSite: $rewriteOnNewSite, reserveAfter: $reserveAfter) {
+    fullArticles
+    length
+    rewriteMinutes
+    rewriteOnNewSite
+    reserveAfter
+  }
+}
+
+# The threads, latest updated first: the threads list (the bottom bar's ⏱).
+query Threads($first: Int) {
+  threads(first: $first) {
+    ...ServerThreadRef
+    summary
+  }
+}
+
+# Every thread with its stories (no footnotes) and related threads: the threads map, asked for when it opens.
+query ThreadsMap($first: Int) {
+  threads(first: $first) {
+    ...ServerThreadRef
+    summary
+    related {
+      id
+    }
+    stories {
+      id
+      title
+      firstWrittenAt
+      writtenAt
+      firstReportAt
+      lastReportAt
+      sentences {
+        text
+      }
+    }
+  }
+}
