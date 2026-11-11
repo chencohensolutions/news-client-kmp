@@ -115,7 +115,33 @@ class NewsServerTest {
             down?.let { throw it }
             return listOf(ServerStory(listOf("y1", "w1"), summary), ServerStory(listOf("y2", "w2")))
         }
+
+        override suspend fun me(): Me {
+            meError?.let { throw it }
+            return Me("reader", role, "Pixel")
+        }
+
+        override suspend fun markRead(urls: List<String>): Int {
+            calls += "markRead ${urls.size}"
+            down?.let { throw it }
+            return urls.size
+        }
+
+        override suspend fun videoStream(articleUrl: String): VideoPath? {
+            calls += "videoStream $articleUrl"
+            return video
+        }
+
+        override suspend fun users(): List<ServerUser> {
+            calls += "users"
+            if (role != UserRole.ADMIN) throw ServerException("admins only", "FORBIDDEN")
+            return listOf(ServerUser("reader", UserRole.ADMIN, emptyList()))
+        }
     }
+
+    private var role = UserRole.USER
+    private var meError: Exception? = null
+    private var video: VideoPath? = null
 
     private val calls = mutableListOf<String>()
     private var answering: Set<String>? = null
@@ -494,5 +520,71 @@ class NewsServerTest {
         assertTrue(store.rows.isEmpty())
         assertTrue(keys.keys.isEmpty())
         assertTrue(!server.inUse)
+    }
+
+    // --- Roles, read marks, video ---
+
+    @Test
+    fun theUsersRoleComesWithConnecting() = runTest {
+        val server = enrolled()
+        assertFalse(assertIs<ServerState.Connected>(server.state.value).admin)
+        assertEquals(UserRole.USER, server.role)
+        assertEquals("USER", store.account?.role)
+    }
+
+    @Test
+    fun anAdminIsToldSo() = runTest {
+        role = UserRole.ADMIN
+        val server = enrolled()
+        assertTrue(assertIs<ServerState.Connected>(server.state.value).admin)
+        assertEquals(listOf(ServerUser("reader", UserRole.ADMIN, emptyList())), server.users().getOrThrow())
+    }
+
+    @Test
+    fun aServerFromBeforeRolesLetsEveryoneChangeIt() = runTest {
+        meError = ServerException("Cannot query field \"me\" on type \"Query\".", "GRAPHQL_VALIDATION_FAILED")
+        val server = enrolled()
+        assertTrue(assertIs<ServerState.Connected>(server.state.value).admin)
+    }
+
+    @Test
+    fun forbiddenTakesTheAdminControlsAway() = runTest {
+        role = UserRole.ADMIN
+        val server = enrolled()
+        role = UserRole.USER // another admin made this one a user meanwhile
+        val result = server.users()
+        assertEquals("FORBIDDEN", (result.exceptionOrNull() as? ServerException)?.code)
+        assertFalse(assertIs<ServerState.Connected>(server.state.value).admin)
+        assertEquals(UserRole.USER, server.role)
+    }
+
+    @Test
+    fun readMarksGoInBatchesOfFiveHundred() = runTest {
+        val server = enrolled()
+        calls.clear()
+        assertTrue(server.markRead((1..1200).map { "u$it" }))
+        assertEquals(listOf("markRead 500", "markRead 500", "markRead 200"), calls)
+    }
+
+    @Test
+    fun readMarksThatCantGoSaySo() = runTest {
+        val server = enrolled()
+        down = IOException("down")
+        assertFalse(server.markRead(listOf("u1")))
+    }
+
+    @Test
+    fun theVideoPlaysFromTheServersAddress() = runTest {
+        val server = enrolled()
+        video = VideoPath("/video/abc/index.m3u8", hls = true)
+        assertEquals(ServerVideo("https://192.168.50.2:56399/video/abc/index.m3u8", true), server.videoStream("y1"))
+        video = null
+        assertNull(server.videoStream("y2"))
+    }
+
+    @Test
+    fun videoUrlJoinsBaseAndPath() {
+        assertEquals("https://h.example:1/video/t/file", videoUrl("https://h.example:1/", "/video/t/file"))
+        assertEquals("https://h.example:1/video/t/file", videoUrl("https://h.example:1", "video/t/file"))
     }
 }
