@@ -69,8 +69,39 @@ sealed interface ThreadLayer {
     /** The threads map: how the threads meet, over time. */
     data object Map : ThreadLayer
 
-    /** A story of the feed, opened from a thread's timeline. */
-    data class Article(val story: news.app.stories.Story) : ThreadLayer
+    /**
+     * A story opened from a thread: the feed's, or, for one the feed no longer has, made from the thread's copy
+     * ([summary], its reports from its footnotes).
+     */
+    data class Article(val story: news.app.stories.Story, val summary: news.app.server.StorySummary? = null) : ThreadLayer
+}
+
+/**
+ * A thread's story the feed doesn't have, as an article page's story and its generated article: its reports are its
+ * footnotes' articles, newest first; [thread] (the thread it was opened from) its thread. Null without footnotes.
+ */
+internal fun threadStoryPage(story: news.app.server.ThreadStory, thread: ThreadRef?): Pair<news.app.stories.Story, news.app.server.StorySummary>? {
+    val reports = story.sentences.flatMap { it.footnotes }.groupBy { it.url }.values
+        .map { notes ->
+            val note = notes.first()
+            news.core.model.ArticleSummary(
+                sourceId = notes.firstNotNullOfOrNull { it.sourceId }.orEmpty(),
+                url = note.url,
+                title = notes.firstNotNullOfOrNull { it.title }.orEmpty(),
+                publishedAt = notes.firstNotNullOfOrNull { it.publishedAt },
+                video = notes.any { it.video },
+            )
+        }
+        .sortedWith(compareBy(nullsLast(reverseOrder())) { it.publishedAt })
+    if (reports.isEmpty()) return null
+    val summary = news.app.server.StorySummary(
+        title = story.title,
+        sentences = story.sentences,
+        writtenAt = story.writtenAt,
+        id = story.id,
+        threads = listOfNotNull(thread),
+    )
+    return news.app.stories.Story(reports) to summary
 }
 
 /** Which sentence a related story shows under its title (settings): whole, never cut. */
