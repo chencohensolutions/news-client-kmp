@@ -10,11 +10,13 @@ data class AppSettings(
     /** A fling of the feed ends with a row's top at the top of the screen ([rememberRowSnapFling]). */
     val snapToRows: Boolean = true,
     /** A story's picture in the feed under its title, subtitle and category, right above its other reports. */
-    val pictureBelowText: Boolean = true,
+    val pictureBelowText: Boolean = false,
     /** Where a generated story's card shows its sources' labels. */
     val sourceLabels: SourceLabels = SourceLabels.BELOW,
     /** A generated story's sentences each on a new line (after its labels when they are inline). */
-    val sentenceLines: Boolean = false,
+    val sentenceLines: Boolean = true,
+    /** How many of a generated story's sentences its card in the feed shows; 0: all of them. Its page shows all. */
+    val feedSentences: Int = 3,
     /** The sentence a related story shows under its title (סיפורים קשורים, the map's story). */
     val relatedLine: RelatedLine = RelatedLine.MOST_CITED,
     /** Labels under the feed's title for the sites and categories picked (with an ✕ each); hidden by default. */
@@ -25,12 +27,14 @@ data class AppSettings(
     val listAhead: Int = 20,
     /** The sites whose new articles are notified ([NewArticleNotifications]); empty: every site. */
     val notifySources: Set<String> = emptySet(),
-    /** The categories whose new articles are notified ([OTHER_CATEGORY] for none); empty: every category. By default the news ones. */
-    val notifyCategories: Set<String> = setOf("israel", "politics", "security", "world", "economy", "law", "tech", "health", OTHER_CATEGORY),
+    /** The categories whose new articles are notified ([OTHER_CATEGORY] for none); empty: every category, the default. */
+    val notifyCategories: Set<String> = emptySet(),
+    /** Notifications of new articles from the background refresh ([NewArticleNotifications]); off by default. */
+    val notifications: Boolean = false,
     /** Refresh on coming back to the app when the feed is more than this many minutes old; 0 is off. */
     val refreshOnReturnMinutes: Int = 2,
     /** Refresh in the background every this many minutes ([BackgroundRefresh]); 0 is off. */
-    val backgroundMinutes: Int = 30,
+    val backgroundMinutes: Int = 0,
     /** The archive folder's tree URI ([ArticleArchive]), or null when not archiving. */
     val archiveFolder: String? = null,
     /** The picture cache's size in MB, its oldest pictures going first past it; 0: as big as leaves 1 GB free. */
@@ -52,7 +56,7 @@ data class AppSettings(
      * New articles in one notification that each background refresh updates, its headlines one under another, instead
      * of a notification per article ([NewArticleNotifications]).
      */
-    val combineNotifications: Boolean = false,
+    val combineNotifications: Boolean = true,
     /** A video that plays stays at the top of the article while scrolling down, so the text can be read beside it. */
     val stickyVideo: Boolean = true,
 )
@@ -89,6 +93,9 @@ val REFRESH_ON_RETURN_CHOICES = listOf(1, 2, 5, 10, 30, 0)
 /** The choices offered for [AppSettings.newWithinHours] (0: no limit). */
 val NEW_WITHIN_HOURS_CHOICES = listOf(6, 12, 24, 48, 0)
 
+/** The choices offered for [AppSettings.feedSentences] (0: all). */
+val FEED_SENTENCES_CHOICES = listOf(1, 2, 3, 5, 0)
+
 /** The choices offered for [AppSettings.readAhead]. */
 val READ_AHEAD_COUNTS = listOf(0, 3, 5, 10)
 
@@ -109,11 +116,13 @@ class SettingsStore(context: Context) {
             newWithinHours = prefs.getInt(NEW_WITHIN_HOURS, defaults.newWithinHours),
             pictureBelowText = prefs.getBoolean(PICTURE_BELOW_TEXT, defaults.pictureBelowText),
             sentenceLines = prefs.getBoolean(SENTENCE_LINES, defaults.sentenceLines),
+            feedSentences = prefs.getInt(FEED_SENTENCES, defaults.feedSentences),
             relatedLine = prefs.getString(RELATED_LINE, null)?.let { n -> RelatedLine.entries.firstOrNull { it.name == n } } ?: defaults.relatedLine,
             sourceLabels = prefs.getString(SOURCE_LABELS, null)?.let { n -> SourceLabels.entries.firstOrNull { it.name == n } } ?: defaults.sourceLabels,
             refreshOnReturnMinutes = prefs.getInt(REFRESH_ON_RETURN_MINUTES, defaults.refreshOnReturnMinutes),
             notifySources = prefs.getStringSet(NOTIFY_SOURCES, null)?.toSet() ?: defaults.notifySources,
             notifyCategories = prefs.getStringSet(NOTIFY_CATEGORIES, null)?.toSet() ?: defaults.notifyCategories,
+            notifications = prefs.getBoolean(NOTIFICATIONS, defaults.notifications),
             readAhead = prefs.getInt(READ_AHEAD, defaults.readAhead),
             listAhead = prefs.getInt(LIST_AHEAD, defaults.listAhead),
             backgroundMinutes = prefs.getInt(BACKGROUND_MINUTES, defaults.backgroundMinutes),
@@ -137,10 +146,12 @@ class SettingsStore(context: Context) {
             .putBoolean(PICTURE_BELOW_TEXT, settings.pictureBelowText)
             .putString(SOURCE_LABELS, settings.sourceLabels.name)
             .putBoolean(SENTENCE_LINES, settings.sentenceLines)
+            .putInt(FEED_SENTENCES, settings.feedSentences)
             .putString(RELATED_LINE, settings.relatedLine.name)
             .putInt(REFRESH_ON_RETURN_MINUTES, settings.refreshOnReturnMinutes)
             .putStringSet(NOTIFY_SOURCES, settings.notifySources)
             .putStringSet(NOTIFY_CATEGORIES, settings.notifyCategories)
+            .putBoolean(NOTIFICATIONS, settings.notifications)
             .putInt(READ_AHEAD, settings.readAhead)
             .putInt(LIST_AHEAD, settings.listAhead)
             .putInt(BACKGROUND_MINUTES, settings.backgroundMinutes)
@@ -189,23 +200,26 @@ class SettingsStore(context: Context) {
         const val SHOW_FILTER_LABELS = "show_filter_labels"
         const val SNAP_TO_ROWS = "snap_to_rows"
         const val NEW_WITHIN_HOURS = "new_within_hours"
-        const val PICTURE_BELOW_TEXT = "picture_below_text"
+        // The keys with a "_v2" took new defaults (2026-11-11): a phone that saved the old values starts on the new ones.
+        const val PICTURE_BELOW_TEXT = "picture_below_text_v2"
         const val SOURCE_LABELS = "source_labels"
-        const val SENTENCE_LINES = "sentence_lines"
+        const val SENTENCE_LINES = "sentence_lines_v2"
+        const val FEED_SENTENCES = "feed_sentences"
         const val RELATED_LINE = "related_line"
         const val REFRESH_ON_RETURN_MINUTES = "refresh_on_return_minutes"
         const val NOTIFY_SOURCES = "notify_sources"
-        const val NOTIFY_CATEGORIES = "notify_categories"
+        const val NOTIFY_CATEGORIES = "notify_categories_v2"
+        const val NOTIFICATIONS = "notifications"
         const val READ_AHEAD = "read_ahead"
         const val LIST_AHEAD = "list_ahead"
-        const val BACKGROUND_MINUTES = "background_minutes"
+        const val BACKGROUND_MINUTES = "background_minutes_v2"
         const val ARCHIVE_FOLDER = "archive_folder"
         const val IMAGE_CACHE_MB = "image_cache_mb"
         const val VIDEO_CACHE_MB = "video_cache_mb"
         const val ARTICLE_CACHE_MB = "article_cache_mb"
         const val TOPICS = "topics"
         const val TOPIC_THRESHOLD = "topic_threshold"
-        const val COMBINE_NOTIFICATIONS = "combine_notifications"
+        const val COMBINE_NOTIFICATIONS = "combine_notifications_v2"
         const val STICKY_VIDEO = "sticky_video"
 
     }

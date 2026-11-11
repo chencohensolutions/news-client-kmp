@@ -108,11 +108,11 @@ class BackgroundRefreshWorker(context: Context, params: WorkerParameters) : Coro
                 considered.save(listed.map { it.url })
             } else if (firstStories != null) {
                 val read = ReadHistory(File(app.filesDir, ReadHistory.FILE)).all()
-                // Only the sites and categories settings ask for (none picked: all).
+                // None when notifications are off; else only the sites and categories settings ask for (none picked: all).
                 // Only those with their article on the phone: the feed shows no other, so a notification would
                 // open on nothing.
                 val wanted = shown(listed).filter { item ->
-                    app.repository.hasArticle(item.url) &&
+                    settings.notifications && app.repository.hasArticle(item.url) &&
                     (settings.notifySources.isEmpty() || item.sourceId in settings.notifySources) &&
                         (settings.notifyCategories.isEmpty() || (item.category ?: OTHER_CATEGORY) in settings.notifyCategories)
                 }

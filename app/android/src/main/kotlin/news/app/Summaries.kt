@@ -114,6 +114,11 @@ internal fun GeneratedPart(
     onThread: (news.app.server.ThreadRef, String) -> Unit = { _, _ -> },
     /** "חדש" or "דיווח חדש", first on the "✦ כתבה מ־N אתרים" line; null for none. */
     badge: String? = null,
+    /**
+     * Only this many of its sentences ([AppSettings.feedSentences]), then "להמשך הכתבה", which opens the page, and no
+     * disagreements (the ⚖ chip still says there are); 0: all.
+     */
+    maxSentences: Int = 0,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -127,7 +132,7 @@ internal fun GeneratedPart(
                 Text("כותרת המקור · ${names[lead.sourceId] ?: lead.sourceId}", style = MaterialTheme.typography.labelMedium, color = muted)
             }
             Spacer(Modifier.weight(1f))
-            FlipChip(if (original) "לכתבה הכתובה" else "למקור", onFlip)
+            FlipChip(if (original) "לכתבה המסוכמת" else "למקור", onFlip)
         }
         if (original) {
             Text(lead.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -135,26 +140,37 @@ internal fun GeneratedPart(
         } else {
             // The whole article as clean text, then what the sites disagree on, then its sources once each.
             Text(summary.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onArticle))
+            val cut = maxSentences > 0 && summary.sentences.size > maxSentences
+            val sentences = if (cut) summary.sentences.take(maxSentences) else summary.sentences
+            val contradictions = if (cut) emptyList() else summary.contradictions
             val body = MaterialTheme.typography.bodyLarge
             when (labels) {
                 SourceLabels.BELOW -> {
                     val gap = if (sentenceLines) "\n" else " "
-                    Text(summary.sentences.joinToString(gap) { it.text }, style = body)
-                    if (summary.contradictions.isNotEmpty()) Disagreements(summary.contradictions) { Text(it.text, style = body) }
+                    Text(sentences.joinToString(gap) { it.text }, style = body)
+                    if (contradictions.isNotEmpty()) Disagreements(contradictions) { Text(it.text, style = body) }
                     // One label a site: its first article, with the film icon when any of its articles has video.
                     val bySite = numbering(summary.sentences + summary.contradictions).groupBy { it.sourceId ?: it.url }.values
                         .map { notes -> notes.first().copy(video = notes.any { it.video }) }
                     SourcesRow(bySite, names, onFootnote)
                 }
                 SourceLabels.PER_SENTENCE -> {
-                    summary.sentences.forEach { Fact(it, names, onFootnote) }
-                    if (summary.contradictions.isNotEmpty()) Disagreements(summary.contradictions) { Fact(it, names, onFootnote) }
+                    sentences.forEach { Fact(it, names, onFootnote) }
+                    if (contradictions.isNotEmpty()) Disagreements(contradictions) { Fact(it, names, onFootnote) }
                 }
                 SourceLabels.INLINE -> {
                     val inline = body.copy(lineHeight = 28.sp)
-                    Inline(summary.sentences, names, onFootnote, inline, lines = sentenceLines)
-                    if (summary.contradictions.isNotEmpty()) Disagreements(summary.contradictions) { Inline(listOf(it), names, onFootnote, inline) }
+                    Inline(sentences, names, onFootnote, inline, lines = sentenceLines)
+                    if (contradictions.isNotEmpty()) Disagreements(contradictions) { Inline(listOf(it), names, onFootnote, inline) }
                 }
+            }
+            if (cut) {
+                Text(
+                    (summary.sentences.size - maxSentences).let { left -> "להמשך הכתבה · " + if (left == 1) "עוד משפט אחד" else "עוד $left משפטים" },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable(onClick = onArticle).padding(vertical = 2.dp),
+                )
             }
             ThreadLines(summary.threads, { onThread(it, summary.id) }, Modifier.padding(top = 6.dp))
         }
@@ -204,7 +220,7 @@ fun SummaryArticleScreen(
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Icon(Icons.Filled.AutoAwesome, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                Text("כתבה כתובה", maxLines = 1)
+                                Text("כתבה מסוכמת", maxLines = 1)
                             }
                             Text(
                                 if (sites.size == 1) "מאתר אחד" else "מ־${sites.size} אתרים",
@@ -448,7 +464,7 @@ private fun FootnotePill(note: Footnote, names: Map<String, String>, onFootnote:
 private fun numbering(sentences: List<Sentence>): List<Footnote> = sentences.flatMap { it.footnotes }.distinctBy { it.url }
 
 /**
- * The sources by number, oldest first by when each was published ([publishedAt] when the footnote doesn't say): a
+ * The sources by number, newest first by when each was published ([publishedAt] when the footnote doesn't say): a
  * day's label once over its sources, then each with its time, number, site and headline; a tap opens it.
  */
 @Composable
@@ -463,7 +479,8 @@ private fun Sources(
     Text("מקורות", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
     val today = java.time.LocalDate.now()
     val zone = java.time.ZoneId.systemDefault()
-    val timed = numbered.map { note -> note to (note.publishedAt ?: publishedAt(note.url)) }.sortedWith(compareBy(nullsLast()) { it.second })
+    val timed = numbered.map { note -> note to (note.publishedAt ?: publishedAt(note.url)) }
+        .sortedWith(compareBy(nullsLast(reverseOrder())) { it.second })
     var lastDay: java.time.LocalDate? = null
     timed.forEach { (note, at) ->
         val day = at?.let { java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()).atZone(zone).toLocalDate() }
