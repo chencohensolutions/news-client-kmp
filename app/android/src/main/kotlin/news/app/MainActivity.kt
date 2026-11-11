@@ -303,7 +303,7 @@ fun NewsApp(
                                 sum.id, sum.threads, threadPages,
                                 onThread = { vm.openThread(it, sum.id) },
                                 onStory = { t ->
-                                    vm.openThreadStory(t) || true.also { sum.threads.firstOrNull()?.let { ref -> vm.openThread(ref, t.id) } }
+                                    vm.openThreadStory(t, sum.threads.firstOrNull()) || true.also { sum.threads.firstOrNull()?.let { ref -> vm.openThread(ref, t.id) } }
                                 },
                                 line = settings.relatedLine,
                             )
@@ -315,7 +315,7 @@ fun NewsApp(
                         when (layer) {
                             is ThreadLayer.Page -> ThreadScreen(
                                 layer.ref, threadPages[layer.ref.id], layer.currentId,
-                                onStory = vm::openThreadStory,
+                                onStory = { vm.openThreadStory(it, layer.ref) },
                                 onThread = { vm.openThread(it, null) },
                                 onBack = vm::closeThreadLayer,
                             )
@@ -327,7 +327,7 @@ fun NewsApp(
                                 line = settings.relatedLine,
                             )
                             ThreadLayer.All -> ThreadsScreen(allThreads, threadsRefreshing && allThreads != null, vm::refreshThreads, onThread = { vm.openThread(it, null) }, onBack = vm::closeThreadLayer)
-                            is ThreadLayer.Article -> layer.story.reports.firstNotNullOfOrNull { headlines.summaries[it.url] }
+                            is ThreadLayer.Article -> (layer.story.reports.firstNotNullOfOrNull { headlines.summaries[it.url] } ?: layer.summary)
                                 ?.let { articlePage(layer.story, it, vm::closeThreadLayer) }
                         }
                     } else if (open == null && story != null && summary != null) {

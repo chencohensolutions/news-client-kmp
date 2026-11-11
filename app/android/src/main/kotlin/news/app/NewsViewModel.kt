@@ -1260,9 +1260,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         settingsStore.threadMapView = view
     }
 
-    /** The map's story: its article when the feed has it, else its thread's page at it. */
+    /** The map's story: its article page; its thread's page at it when there is nothing to show. */
     fun openMapStory(story: news.app.server.ThreadStory, thread: news.app.server.ThreadRef) {
-        if (!openThreadStory(story)) openThread(thread, story.id)
+        if (!openThreadStory(story, thread)) openThread(thread, story.id)
     }
 
     /** Back from the top thread layer. */
@@ -1270,14 +1270,26 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         _threadLayers.update { it.dropLast(1) }
     }
 
-    /** A thread's story: its article when the feed has it (true), else nothing (false). */
-    fun openThreadStory(story: news.app.server.ThreadStory): Boolean {
+    /**
+     * A thread's story ([thread]: the one it was opened from) as its article page: the feed's story when the feed has
+     * it, else one made from the thread's copy, its reports from its footnotes. False when there is nothing to show
+     * (no footnotes).
+     */
+    fun openThreadStory(story: news.app.server.ThreadStory, thread: news.app.server.ThreadRef? = null): Boolean {
         val s = _headlines.value
         val inFeed = (s.stories as? StoriesState.Ready)?.stories.orEmpty()
-            .firstOrNull { st -> st.reports.any { s.summaries[it.url]?.id == story.id } } ?: return false
-        _threadLayers.update { it + ThreadLayer.Article(inFeed) }
-        markStoryOpened(inFeed)
-        loadThreadsOf(inFeed)
+            .firstOrNull { st -> st.reports.any { s.summaries[it.url]?.id == story.id } }
+        if (inFeed != null) {
+            _threadLayers.update { it + ThreadLayer.Article(inFeed) }
+            markStoryOpened(inFeed)
+            loadThreadsOf(inFeed)
+            loadStoryArticles(inFeed)
+            return true
+        }
+        val (made, summary) = threadStoryPage(story, thread) ?: return false
+        _threadLayers.update { it + ThreadLayer.Article(made, summary) }
+        summary.threads.forEach { loadThread(it.id) }
+        loadStoryArticles(made)
         return true
     }
 
