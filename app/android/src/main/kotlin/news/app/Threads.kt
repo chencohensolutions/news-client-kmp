@@ -118,6 +118,28 @@ internal fun ThreadStory.lead(line: RelatedLine = RelatedLine.MOST_CITED): Strin
 internal val ThreadStory.startedAt: Instant
     get() = firstReportAt ?: sentences.flatMap { it.footnotes }.mapNotNull { it.publishedAt }.minOrNull()?.takeIf { it < firstWrittenAt } ?: firstWrittenAt
 
+/** When a thread's story was last reported: its latest report's time, else when it began. */
+internal val ThreadStory.latestAt: Instant
+    get() = lastReportAt?.takeIf { it > startedAt } ?: startedAt
+
+/**
+ * A story's time on the newest-first timeline, under the day of its latest report ([latestAt]): as [spanOf] when it
+ * began that day, else from its start's day: "אתמול 22:40 → 09:15", "יום א׳ 22:40 → 09:15" or "8.11 22:40 → 09:15".
+ */
+internal fun spanBackOf(story: ThreadStory, today: java.time.LocalDate): String {
+    val start = story.startedAt
+    val end = story.latestAt
+    val day = localDate(start)
+    val endDay = localDate(end)
+    if (day == endDay) return spanOf(story, today)
+    val from = when {
+        day == today.minusDays(1) -> "אתמול"
+        java.time.temporal.ChronoUnit.DAYS.between(day, endDay) < 7 -> day.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.forLanguageTag("he"))
+        else -> "${day.dayOfMonth}.${day.monthValue}"
+    }
+    return "$from ${timeOf(start)} → ${timeOf(end)}"
+}
+
 /**
  * A story's time on the timeline, under its day's label: "22:40"; its span when its last report came 30 minutes or more
  * later, "22:40–23:15" the same day, "22:40 → אתמול 09:15", "→ יום ה׳ 09:15" or "→ 12.11" on a later one.
@@ -236,15 +258,18 @@ fun ThreadScreen(
                         FilterChip(!fromStart, { fromStart = false }, label = { Text("מהחדש") })
                         FilterChip(fromStart, { fromStart = true }, label = { Text("מההתחלה") })
                     }
-                    val stories = page.stories.sortedBy { it.startedAt }.let { if (fromStart) it else it.reversed() }
+                    // From the start: by when each began. Newest first: by its latest report, so a story still being
+                    // reported comes up top, its span saying when it began.
+                    val placedAt = { st: ThreadStory -> if (fromStart) st.startedAt else st.latestAt }
+                    val stories = page.stories.sortedBy(placedAt).let { if (fromStart) it else it.reversed() }
                     // Grouped by day: a year's heading when it changes (or isn't this one), a day's label once over its stories,
                     // and each story its time.
                     val today = LocalDate.now()
-                    val years = stories.map { localDate(it.startedAt).year }.distinct()
+                    val years = stories.map { localDate(placedAt(it)).year }.distinct()
                     var lastYear = -1
                     var lastDay: LocalDate? = null
                     stories.forEachIndexed { i, story ->
-                        val date = localDate(story.startedAt)
+                        val date = localDate(placedAt(story))
                         if (date.year != lastYear && (years.size > 1 || date.year != today.year)) {
                             Text("${date.year}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                         }
@@ -270,7 +295,7 @@ fun ThreadScreen(
                             Column(Modifier.weight(1f).padding(bottom = 14.dp)) {
                                 // When it began, to its last report when later; a tiny ✎ only when rewritten well after that.
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(spanOf(story, today), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                    Text(if (fromStart) spanOf(story, today) else spanBackOf(story, today), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                                     val reported = story.lastReportAt ?: story.startedAt
                                     if (story.writtenAt - reported > 30.minutes && localDate(story.writtenAt) == localDate(reported)) {
                                         Text("✎ ${timeOf(story.writtenAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
