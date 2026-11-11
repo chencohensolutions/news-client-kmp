@@ -225,7 +225,11 @@ fun SettingsScreen(
                             SwitchRow(
                                 title = source.name,
                                 subtitle = source.baseUrl.removePrefix("https://").removePrefix("http://").removePrefix("www.") +
-                                    if (source.enabled) " · בפיד שלי" else " · השרת לא קורא אותו",
+                                    when {
+                                        !source.enabled -> " · השרת לא קורא אותו"
+                                        source.hidden -> " · מוסתר מהפיד שלי"
+                                        else -> " · בפיד שלי"
+                                    },
                                 checked = source.enabled && !source.hidden,
                                 enabled = source.enabled,
                                 onChange = { on -> onSourceHidden(source.id, !on) },
