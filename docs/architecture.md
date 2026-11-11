@@ -36,14 +36,16 @@ in the BitTorrent DHT by its key when they all stop answering (`news.app.server.
   generated article, sentence lines, what a related story shows, snapping, sticky video), what counts as new,
   prefetching pictures while scrolling and reading, notifications, and when to refresh. In `AppSettings`
   ([Settings.kt](../app/android/src/main/kotlin/news/app/Settings.kt)).
-- **Reading state**: read and viewed marks, the site and category filters, the saved topics of the topic search.
+- **Reading state**: read and viewed marks (the read marks also go to the server, to follow the user to their other
+  devices), the site and category filters, the saved topics of the topic search.
 - **Caches**: articles (`FeedCache`), pictures (Coil) and played video (Media3), each within its quota, and an
   optional archive folder that keeps every article with its pictures and played videos (`ArticleArchive`).
 - **Topic search** matches a saved topic's words in the headlines on the phone (`news.app.stories.wordScores`).
 
 Settings that belong to the server are read from it and changed on it: the sites it reads (on or off, RSS or pages,
 the wait between requests), how it groups stories (method, strictness, what it compares, the days), and how it writes
-the generated articles (length, full articles, how often it rewrites, its daily reserve).
+the generated articles (length, full articles, how often it rewrites, its daily reserve). Only the server's admins change
+these; other users see them read-only, and keep their own choices there: the sites of their feed and their read marks.
 
 ## Modules
 
@@ -77,12 +79,13 @@ news server ──GraphQL/mTLS──▶ NewsServer ──▶ NewsRepository ─�
                                     └─ stories, generated articles, threads, stats, settings
 ```
 
-Pictures and videos load from where the server's articles point (the sites' media servers); the server sends their
-addresses, not the files.
+Pictures load from where the server's articles point (the sites' media servers); the server sends their addresses,
+not the files. Videos play through the server ([news-server.md](news-server.md#what-comes-from-the-server)).
 
 ## Roadmap
 
 1. **Server-only client (done).** The app made from the earlier phone-scraping reader, its scraping, on-device
    grouping and fetch settings removed.
-2. **Roles and video.** Admin and user roles (who may change the server's settings), and video streamed by the server
-   so every article's video plays in the app's own player.
+2. **Roles and video (done).** Admin and user roles (who may change the server's settings, and an admin page for
+   the server's people), each user's own sites and read marks on the server, and video streamed by the server so
+   every article's video plays in the app's own player.

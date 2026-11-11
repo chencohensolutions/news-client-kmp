@@ -56,17 +56,30 @@ Everything, in the foreground and in the background:
   two sites. Otherwise each headline is a story of its own.
 - **Sites** (Settings › אתרים): the server's sites (`sources`) with how it reads each; switching a site on or off, its
   RSS feed instead of its pages, and the wait between its requests are saved on the server (`setSource`) and count
-  from its next read. A site switched off on the server is hidden on the phone too.
+  from its next read. Only an admin changes these; for everyone else they show read-only. Each user also picks the
+  sites of their own feed ("בפיד שלי", `setSourceHidden`, `Source.hidden`), kept on the server for all their devices;
+  the feed leaves out those and the sites the server doesn't read.
+- **Roles**: the phone asks `me` when it connects. An admin (Settings › משתמשים ומכשירים) sees the users and their
+  devices, invites someone (`createInvite`: the code and its QR code, for a new user or another device of one),
+  changes a role, revokes a device and removes a user. A server from before roles (no `me`) lets everyone change its
+  settings. An `@admin` call that answers FORBIDDEN takes the admin controls away.
+- **Read marks** follow the user across devices (`ReadSync`): an opened article goes out with `markRead`, a few
+  seconds after the last one (the marks wait in `read-outbox.txt` until the server takes them), and every refresh
+  brings in `readArticles` since the newest read time heard (`read-since.txt`).
+- **Video** comes through the server: on play, `videoStream(url)` gives a path on the server (HLS or an MP4), played
+  in the app's player with the phone's certificate and the pinned key (Media3's OkHttp data source,
+  `NewsServer.mediaClient`). When it is null, the article's embed plays in a web view. The archive saves a played
+  video from the same server stream, asked for again when it archives (the paths last 6 hours).
 - The background refresh goes through the same `NewsRepository.latest`.
-- Pictures and videos load from the sites' media servers: the server sends their addresses, not the files.
-- Topic search, read marks, notifications and the archive stay on the phone.
+- Pictures load from the sites' media servers: the server sends their addresses, not the files.
+- Topic search, notifications and the archive stay on the phone.
 
 When the server doesn't answer, the feed stays as it was, its title line says "שרת החדשות לא עונה", Settings shows
 "השרת לא עונה" with a retry, and every refresh asks the server again. What is already on the phone stays readable.
 
 ## The schema
 
-`app/android/src/main/graphql/*.graphqls` is news-server-go's `graph/schema/*.graphql`, copied:
+`app/android/src/main/graphql/*.graphqls` is the server's `graph/schema/*.graphql` (news-server-go, or news-server-core-go with `-PnewsServerDir`), copied:
 
 ```bash
 ./gradlew :app:android:syncServerSchema    # from ../news-server-go, or -PnewsServerDir=<path>
