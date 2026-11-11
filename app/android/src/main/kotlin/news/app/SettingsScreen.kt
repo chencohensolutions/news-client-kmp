@@ -405,7 +405,7 @@ private fun MainPage(
     var confirmAllViewed by remember { mutableStateOf(false) }
     ListItem(
         headlineContent = { Text("סימון הכל כנצפה") },
-        supportingContent = { Text("כל הכותרות והכתבות הכתובות בפיד יפסיקו להיות חדשות, והמונה של חדשים יתאפס") },
+        supportingContent = { Text("כל הכותרות והכתבות המסוכמות בפיד יפסיקו להיות חדשות, והמונה של חדשים יתאפס") },
         leadingContent = { Icon(Icons.Filled.Visibility, null) },
         trailingContent = { TextButton(onClick = { confirmAllViewed = true }) { Text("סימון") } },
     )
@@ -413,7 +413,7 @@ private fun MainPage(
         AlertDialog(
             onDismissRequest = { confirmAllViewed = false },
             title = { Text("לסמן הכל כנצפה?") },
-            text = { Text("שום כותרת או כתבה כתובה בפיד לא תסומן עוד כחדשה. סימוני הקריאה לא משתנים.") },
+            text = { Text("שום כותרת או כתבה מסוכמת בפיד לא תסומן עוד כחדשה. סימוני הקריאה לא משתנים.") },
             confirmButton = { TextButton(onClick = { confirmAllViewed = false; onMarkAllViewed() }) { Text("סימון") } },
             dismissButton = { TextButton(onClick = { confirmAllViewed = false }) { Text("ביטול") } },
         )
@@ -421,7 +421,7 @@ private fun MainPage(
 
     Section("סיפורים")
     ChoiceRow(
-        title = "תוויות המקורות בכתבה כתובה",
+        title = "תוויות המקורות בכתבה מסוכמת",
         subtitle = "איפה מופיעים שמות האתרים שמהם נכתבה הכתבה, בכרטיס שלה בפיד.",
         options = SourceLabels.entries.map { it to it.title },
         selected = settings.sourceLabels,
@@ -481,9 +481,16 @@ private fun MainPage(
         selected = settings.relatedLine,
         onSelect = { onChange(settings.copy(relatedLine = it)) },
     )
+    ChoiceRow(
+        title = "משפטים בכרטיס בפיד",
+        subtitle = "כמה משפטים מהכתבה המסוכמת מופיעים בכרטיס שלה בפיד. הכתבה המלאה נפתחת בלחיצה על הכותרת.",
+        options = FEED_SENTENCES_CHOICES.map { it to if (it == 0) "ללא הגבלה" else "$it" },
+        selected = settings.feedSentences,
+        onSelect = { onChange(settings.copy(feedSentences = it)) },
+    )
     SwitchRow(
         title = "כל משפט בשורה חדשה",
-        subtitle = "בכתבה כתובה, כל משפט מתחיל בשורה חדשה (אחרי תוויות המקורות שלו כשהן בתוך הטקסט). כבוי: פסקה אחת רציפה.",
+        subtitle = "בכתבה מסוכמת, כל משפט מתחיל בשורה חדשה (אחרי תוויות המקורות שלו כשהן בתוך הטקסט). כבוי: פסקה אחת רציפה.",
         checked = settings.sentenceLines,
         onChange = { onChange(settings.copy(sentenceLines = it)) },
     )
@@ -554,7 +561,7 @@ private fun MainPage(
         if (settings.notifySources.isEmpty()) null else "${settings.notifySources.size} אתרים",
         if (settings.notifyCategories.isEmpty()) null else "${settings.notifyCategories.size} נושאים",
     ).joinToString(" · ").ifEmpty { "כל האתרים והנושאים" }
-    NavRow(Icons.Filled.Notifications, "התראות", "כתבות חדשות מהרענון ברקע · $notifyWhat") { onOpen(SettingsPage.NOTIFICATIONS) }
+    NavRow(Icons.Filled.Notifications, "התראות", if (settings.notifications) "כתבות חדשות מהרענון ברקע · $notifyWhat" else "כבויות") { onOpen(SettingsPage.NOTIFICATIONS) }
     val day = backgroundRuns.filter { it.startedAt > System.currentTimeMillis() - DAY_MS }
     NavRow(
         Icons.Filled.History, "יומן הרענונים",
@@ -918,6 +925,16 @@ private fun NotificationsPage(settings: AppSettings, sources: List<Site>, onChan
     Muted(
         "התראות על כתבות חדשות מגיעות מהרענון ברקע (תדירות, בהגדרות). כאן בוחרים מאילו אתרים ונושאים; בלי בחירה, מכולם.",
         Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+    SwitchRow(
+        title = "התראות על כתבות חדשות",
+        subtitle = when {
+            !settings.notifications -> "כבוי: הרענון ברקע לא מציג התראות."
+            settings.backgroundMinutes == 0 -> "הרענון ברקע כבוי (תדירות, בהגדרות), אז עוד לא יגיעו התראות."
+            else -> "כל רענון ברקע מודיע על הכתבות החדשות מהאתרים והנושאים שנבחרו למטה."
+        },
+        checked = settings.notifications,
+        onChange = { onChange(settings.copy(notifications = it)) },
     )
     SwitchRow(
         title = "התראה אחת לכל הכתבות",

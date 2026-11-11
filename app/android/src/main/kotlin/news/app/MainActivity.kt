@@ -188,8 +188,8 @@ fun NewsApp(
     // Refreshing in the background tells of new articles in notifications: Android 13 and later ask for that once.
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     val context = LocalContext.current
-    LaunchedEffect(settings.backgroundMinutes) {
-        if (settings.backgroundMinutes > 0 && !NewArticleNotifications.allowed(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    LaunchedEffect(settings.backgroundMinutes, settings.notifications) {
+        if (settings.backgroundMinutes > 0 && settings.notifications && !NewArticleNotifications.allowed(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
@@ -357,6 +357,7 @@ fun NewsApp(
                                 pictureBelow = settings.pictureBelowText,
                                 sourceLabels = settings.sourceLabels,
                                 sentenceLines = settings.sentenceLines,
+                                feedSentences = settings.feedSentences,
                                 onPrefetch = vm::prefetchListImages,
                                 onNearEnd = vm::showMoreOlder,
                                 topics = settings.topics,

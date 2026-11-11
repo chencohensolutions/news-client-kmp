@@ -19,7 +19,8 @@ import kotlin.math.pow
  * The feed's fling ([AppSettings.snapToRows]): it goes on to the next row in its direction, none skipped, and slows
  * into it, from the finger's speed to a stop with that row's top at the list's top (under the status bar and the
  * progress lines, once the header is gone). A row taller than the screen is let stop anywhere in its middle, so its
- * lower part can be read.
+ * lower part can be read. Once a fling has stopped at a row's top, the next ones run free rather than come back to
+ * that row: only another row's top stops one again.
  */
 @Composable
 internal fun rememberRowSnapFling(listState: LazyListState): FlingBehavior {
@@ -29,10 +30,22 @@ internal fun rememberRowSnapFling(listState: LazyListState): FlingBehavior {
 
 private class RowSnapFling(private val listState: LazyListState, private val decay: DecayAnimationSpec<Float>) : FlingBehavior {
 
+    /** The key of the row the last fling stopped at the top of: no fling stops there again until another row's does. */
+    private var snapped: Any? = null
+
     override suspend fun ScrollScope.performFling(initialVelocity: Float): Float {
         val info = listState.layoutInfo
-        val end = flingEnd(info, initialVelocity, decay.calculateTargetValue(0f, initialVelocity))
+        val end = flingEnd(info, initialVelocity, decay.calculateTargetValue(0f, initialVelocity), snapped)
         if (end !is FlingEnd.RowTop) return glide(initialVelocity)
+        try {
+            return snap(info, end, initialVelocity)
+        } finally {
+            snapped = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == end.index }?.key
+        }
+    }
+
+    /** Slows from [initialVelocity] into [end], its top at the list's top. */
+    private suspend fun ScrollScope.snap(info: LazyListLayoutInfo, end: FlingEnd.RowTop, initialVelocity: Float): Float {
         // Its distance now; a row above the screen isn't laid out yet: about a row's height up until it shows.
         val rows = info.visibleItemsInfo
         val measured = distanceTo(info, end.index)
@@ -83,9 +96,20 @@ internal sealed interface FlingEnd {
 /**
  * Where a fling of [velocity] (forward, down the list, above 0) ends, by [info]'s rows, [natural] the distance it would
  * go by itself: at the top of the next row its way, or, slow (a finger let go), of the nearer one. Inside a row taller
- * than the list ([TALL_ROW_EDGE] of the list's height from either end), where it would.
+ * than the list ([TALL_ROW_EDGE] of the list's height from either end), where it would. Where it would too instead of
+ * at the top of the row whose key is [snapped], the one the last fling stopped at.
  */
-internal fun flingEnd(info: LazyListLayoutInfo, velocity: Float, natural: Float): FlingEnd {
+internal fun flingEnd(info: LazyListLayoutInfo, velocity: Float, natural: Float, snapped: Any? = null): FlingEnd {
+    val end = rowEnd(info, velocity, natural)
+    // The row the last fling stopped at: free this time.
+    if (snapped != null && end is FlingEnd.RowTop && info.visibleItemsInfo.firstOrNull { it.index == end.index }?.key == snapped) {
+        return FlingEnd.Natural
+    }
+    return end
+}
+
+/** [flingEnd] by the rows alone. */
+private fun rowEnd(info: LazyListLayoutInfo, velocity: Float, natural: Float): FlingEnd {
     val rows = info.visibleItemsInfo
     if (rows.isEmpty()) return FlingEnd.Natural
     // A row's offset is from the list's top below its padding: scrolling by it puts the row's top there.

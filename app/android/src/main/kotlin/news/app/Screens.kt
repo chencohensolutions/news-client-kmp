@@ -205,6 +205,8 @@ fun HeadlinesScreen(
     /** Where generated cards show their sources' labels. */
     sourceLabels: SourceLabels = SourceLabels.BELOW,
     sentenceLines: Boolean = false,
+    /** How many sentences a generated card shows ([AppSettings.feedSentences]); 0: all. */
+    feedSentences: Int = 0,
     onThread: (news.app.server.ThreadRef, String) -> Unit = { _, _ -> },
     /** The bottom bar's ⏱: every thread. */
     onThreads: () -> Unit = {},
@@ -227,7 +229,7 @@ fun HeadlinesScreen(
     onShowOriginal: (Boolean) -> Unit = {},
     /** One story's ⇄: its card to the other view, by its lead's URL. */
     onFlip: (String) -> Unit = {},
-    /** "רק כתבות כתובות": only the stories with a generated article. */
+    /** "רק כתבות מסוכמות": only the stories with a generated article. */
     onOnlyGenerated: (Boolean) -> Unit = {},
     /** "חדש עד" ([AppSettings.newWithinHours]): which generated stories the חדשים badge counts. */
     newWithinHours: Int = 0,
@@ -529,7 +531,8 @@ fun HeadlinesScreen(
                         },
                     ) { Icon(Icons.Filled.ArrowUpward, "לראש הרשימה") }
                 }
-                // The bar gone down with the scroll: the new ones still below stay counted, a small pill where it was.
+                // The bar gone down with the scroll: the new ones still below stay counted, a small pill where it was; a tap goes
+                // to the first of them.
                 val newLeft = if (generated && state.onlyGenerated) unreadStories.size else feed.newCount
                 AnimatedVisibility(
                     visible = newLeft > 0 && barHeight > 0 && barOffset > barHeight * 0.6f,
@@ -537,13 +540,29 @@ fun HeadlinesScreen(
                     modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 12.dp).zIndex(2f),
                 ) {
                     Surface(
-                        onClick = { barOffset = 0f },
+                        // To the first story still new: the header and the bottom bar come back with it, as with ↑.
+                        onClick = {
+                            val first = shown.indexOfFirst(isNew)
+                            headerOffset = 0f
+                            barOffset = 0f
+                            if (first >= 0) scope.launch {
+                                // The rows above the stories: a site's failure, a message.
+                                val above = (if (site != null && failure != null) 1 else 0) +
+                                    (if ((state.items.isEmpty() && !state.refreshing) || (searching && feed.all.isEmpty() && !topicsWorking)) 1 else 0)
+                                val target = above + first
+                                // A long way off, a jump most of the way first, so the ride is short.
+                                val from = listState.firstVisibleItemIndex
+                                if (from - target > TOP_JUMP) listState.scrollToItem(target + TOP_JUMP)
+                                else if (target - from > TOP_JUMP) listState.scrollToItem(target - TOP_JUMP)
+                                listState.animateScrollToItem(target)
+                            }
+                        },
                         shape = RoundedCornerShape(50),
                         color = MaterialTheme.colorScheme.primaryContainer,
                         shadowElevation = 4.dp,
                     ) {
                         Text(
-                            if (newLeft > 99) "99+ חדשים" else "$newLeft חדשים",
+                            "$newLeft חדשים",
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                         )
@@ -600,6 +619,7 @@ fun HeadlinesScreen(
                             pictureBelow = pictureBelow,
                             sourceLabels = sourceLabels,
                             sentenceLines = sentenceLines,
+                            feedSentences = feedSentences,
                             onThread = onThread,
                             summary = story.reports.firstNotNullOfOrNull { state.summaries[it.url] },
                             onFootnote = onFootnote,
@@ -817,6 +837,8 @@ private fun StoryItem(
     pictureBelow: Boolean = false,
     sourceLabels: SourceLabels = SourceLabels.BELOW,
     sentenceLines: Boolean = false,
+    /** How many sentences a generated card shows ([AppSettings.feedSentences]); 0: all. */
+    feedSentences: Int = 0,
     onThread: (news.app.server.ThreadRef, String) -> Unit = { _, _ -> },
     /** The story's generated article (the news server's): shown in place of the lead's title and subtitle. */
     summary: StorySummary? = null,
@@ -880,6 +902,7 @@ private fun StoryItem(
             Spacer(Modifier.height(10.dp))
             if (summary != null) {
                 GeneratedPart(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary, onFootnote, sourceLabels, sentenceLines, onThread,
+                    maxSentences = feedSentences,
                     badge = if (generatedView && generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null)
             } else {
                 Text(

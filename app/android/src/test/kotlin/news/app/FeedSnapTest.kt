@@ -51,6 +51,15 @@ class FeedSnapTest {
     }
 
     @Test
+    fun theRowLastStoppedAtLetsTheNextFlingRunFree() {
+        // Row 3 was stopped at: a fling up from inside it, or a finger let go near its top, no longer comes back to it.
+        assertEquals(FlingEnd.Natural, flingEnd(layout(300, 300, 300, 300, first = 3, scrolled = 100), -3000f, -900f, snapped = 3))
+        assertEquals(FlingEnd.Natural, flingEnd(layout(300, 300, 300, 300, first = 3, scrolled = 100), 0f, 0f, snapped = 3))
+        // Another row's top still stops it.
+        assertEquals(top(4), flingEnd(layout(300, 300, 300, 300, first = 3, scrolled = 100), 3000f, 900f, snapped = 3))
+    }
+
+    @Test
     fun aFingerLetGoSettlesOnTheNearerRow() {
         assertEquals(top(3), flingEnd(layout(300, 300, 300, 300, first = 3, scrolled = 100), 0f, 0f))
         assertEquals(top(4), flingEnd(layout(300, 300, 300, 300, first = 3, scrolled = 200), 0f, 0f))
