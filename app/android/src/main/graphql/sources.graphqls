@@ -13,11 +13,16 @@ extend type Mutation {
   sites. A site switched off is not read, and its headlines leave headlines and stories at once. An unknown id or a
   waitMs out of range fails with BAD_REQUEST in extensions.code.
   """
-  setSource(id: String!, enabled: Boolean, feed: Boolean, waitMs: Int): Source!
+  setSource(id: String!, enabled: Boolean, feed: Boolean, waitMs: Int): Source! @admin
+  """
+  Hides a site from the calling user's feed, or shows it again: their choice alone, kept on the server for all their
+  devices. The server goes on reading it for the others. An unknown id fails with BAD_REQUEST.
+  """
+  setSourceHidden(id: String!, hidden: Boolean!): Source!
 }
 
 type Source {
-  "Stable id, the folder's name under sources/ (\"example\"); stored on every article."
+  "Stable id, the folder's name under sources/ (\"siteh\"); stored on every article."
   id: String!
   "Display name."
   name: String!
@@ -32,4 +37,6 @@ type Source {
   feed: Boolean!
   "The site's wait between two of its requests, in milliseconds (0 to 60000; 250 unless set)."
   waitMs: Int!
+  "Whether the calling user hid the site from their feed (setSourceHidden)."
+  hidden: Boolean!
 }

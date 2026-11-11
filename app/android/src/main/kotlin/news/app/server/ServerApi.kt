@@ -27,6 +27,18 @@ import news.app.server.graphql.fragment.ServerGroupingFields
 import news.app.server.graphql.fragment.ServerSentence
 import news.app.server.graphql.SourcesQuery
 import news.app.server.graphql.StatsQuery
+import news.app.server.graphql.CreateInviteMutation
+import news.app.server.graphql.MarkReadMutation
+import news.app.server.graphql.MeQuery
+import news.app.server.graphql.ReadArticlesQuery
+import news.app.server.graphql.RemoveUserMutation
+import news.app.server.graphql.RevokeDeviceMutation
+import news.app.server.graphql.SetSourceHiddenMutation
+import news.app.server.graphql.SetUserRoleMutation
+import news.app.server.graphql.UsersQuery
+import news.app.server.graphql.VideoStreamQuery
+import news.app.server.graphql.fragment.ServerUser as ServerUserFields
+import news.app.server.graphql.type.Role as GraphqlRole
 import news.app.server.graphql.fragment.ServerSourceFields
 import news.app.server.graphql.StoriesQuery
 import news.app.server.graphql.fragment.Enrollment
@@ -55,7 +67,42 @@ data class ServerSource(
     val hasFeed: Boolean = false,
     val feed: Boolean = false,
     val waitMs: Int = 250,
+    /** This user hid it from their feed ([ServerApi.setSourceHidden]): their choice, for all their devices. */
+    val hidden: Boolean = false,
 )
+
+/** A user's role on the server: an admin changes what it does for everyone and manages its people; a user reads. */
+enum class UserRole { ADMIN, USER }
+
+/** Who this device is on the server (`me`). */
+data class Me(val user: String, val role: UserRole, val deviceName: String?)
+
+/** A user of the server and their devices, oldest first, revoked ones too (`users`, admins only). */
+data class ServerUser(val name: String, val role: UserRole, val devices: List<ServerDevice>)
+
+/** One enrolled device: its certificate's [serial], when it enrolled and expires, and whether it was revoked. */
+data class ServerDevice(
+    val serial: String,
+    val name: String,
+    val keyProtection: String,
+    val registeredAt: Instant,
+    val expiresAt: Instant,
+    val revokedAt: Instant? = null,
+    /** The device asking: this phone. */
+    val current: Boolean = false,
+)
+
+/** A one-time enrollment code for [user]'s next device, and the `news://enroll` link its QR code holds. */
+data class Invite(val code: String, val user: String, val role: UserRole, val expiresAt: Instant, val link: String)
+
+/** An article this user read, on any of their devices, and when the server heard of it. */
+data class ReadMark(val url: String, val readAt: Instant)
+
+/** An article's video on the server: its full [url] there, played with the phone's certificate; HLS when [hls]. */
+data class ServerVideo(val url: String, val hls: Boolean)
+
+/** An article's video as the server relays it: [path] on the server, an HLS playlist when [hls], else an MP4. */
+data class VideoPath(val path: String, val hls: Boolean)
 
 /** What the server says it can do (serverInfo). */
 data class ServerInfo(
@@ -270,9 +317,34 @@ interface ServerApi {
     /** Changes one site's settings on the server; null fields keep their value. Its settings as they are now. */
     suspend fun setSource(id: String, enabled: Boolean? = null, feed: Boolean? = null, waitMs: Int? = null): ServerSource
 
+    /** Who this device is: its user and their role. */
+    suspend fun me(): Me = Me("", UserRole.ADMIN, null)
+
+    /** Hides a site from this user's feed, or shows it again; the site as it is now. */
+    suspend fun setSourceHidden(id: String, hidden: Boolean): ServerSource = throw UnsupportedOperationException()
+
+    /** Marks [urls] read for this user (at most [MAX_MARK_READ]); how many. */
+    suspend fun markRead(urls: List<String>): Int = urls.size
+
+    /** The articles this user read since [since] (all when null), from any of their devices. */
+    suspend fun readArticles(since: Instant?): List<ReadMark> = emptyList()
+
+    /** [articleUrl]'s video as the server relays it; null when it has none it can relay. */
+    suspend fun videoStream(articleUrl: String): VideoPath? = null
+
+    // Admins only: anyone else gets FORBIDDEN.
+    suspend fun users(): List<ServerUser> = emptyList()
+    suspend fun createInvite(user: String, role: UserRole): Invite = throw UnsupportedOperationException()
+    suspend fun setUserRole(user: String, role: UserRole): ServerUser = throw UnsupportedOperationException()
+    suspend fun revokeDevice(serial: String): Boolean = throw UnsupportedOperationException()
+    suspend fun removeUser(user: String): Boolean = throw UnsupportedOperationException()
+
     companion object {
         /** The most URLs `articles` takes at once. */
         const val MAX_ARTICLES = 200
+
+        /** The most URLs `markRead` takes at once. */
+        const val MAX_MARK_READ = 500
     }
 }
 
@@ -461,7 +533,48 @@ class ApolloServerApi(url: String, http: OkHttpClient) : ServerApi {
             ).execute()
         }.setSource.serverSourceFields.toServerSource()
 
-    private fun ServerSourceFields.toServerSource() = ServerSource(id, name, baseUrl, language, enabled, hasFeed, feed, waitMs)
+    override suspend fun setSourceHidden(id: String, hidden: Boolean): ServerSource =
+        run { mutation(SetSourceHiddenMutation(id, hidden)).execute() }.setSourceHidden.serverSourceFields.toServerSource()
+
+    private fun ServerSourceFields.toServerSource() = ServerSource(id, name, baseUrl, language, enabled, hasFeed, feed, waitMs, hidden)
+
+    override suspend fun me(): Me = run { query(MeQuery()).execute() }.me.let { Me(it.user, it.role.toRole(), it.deviceName) }
+
+    override suspend fun markRead(urls: List<String>): Int =
+        run { mutation(MarkReadMutation(urls.take(ServerApi.MAX_MARK_READ))).execute() }.markRead
+
+    override suspend fun readArticles(since: Instant?): List<ReadMark> =
+        run { query(ReadArticlesQuery(Optional.presentIfNotNull(since?.toString()))).execute() }
+            .readArticles.mapNotNull { r -> instantOrNull(r.readAt)?.let { ReadMark(r.url, it) } }
+
+    override suspend fun videoStream(articleUrl: String): VideoPath? =
+        run { query(VideoStreamQuery(articleUrl)).execute() }.videoStream?.let { VideoPath(it.path, it.hls) }
+
+    override suspend fun users(): List<ServerUser> = run { query(UsersQuery()).execute() }.users.map { it.serverUser.toUser() }
+
+    override suspend fun createInvite(user: String, role: UserRole): Invite =
+        run { mutation(CreateInviteMutation(user, Optional.present(role.toGraphql()))).execute() }.createInvite.let {
+            Invite(it.code, it.user, it.role.toRole(), Instant.parse(it.expiresAt), it.link)
+        }
+
+    override suspend fun setUserRole(user: String, role: UserRole): ServerUser =
+        run { mutation(SetUserRoleMutation(user, role.toGraphql())).execute() }.setUserRole.serverUser.toUser()
+
+    override suspend fun revokeDevice(serial: String): Boolean =
+        run { mutation(RevokeDeviceMutation(serial)).execute() }.revokeDevice.revokedAt != null
+
+    override suspend fun removeUser(user: String): Boolean = run { mutation(RemoveUserMutation(user)).execute() }.removeUser
+
+    private fun ServerUserFields.toUser() = ServerUser(
+        name, role.toRole(),
+        devices.map { d ->
+            ServerDevice(d.serial, d.name, d.keyProtection, Instant.parse(d.registeredAt), Instant.parse(d.expiresAt), d.revokedAt?.let(::instantOrNull), d.current)
+        },
+    )
+
+    private fun GraphqlRole.toRole() = if (this == GraphqlRole.ADMIN) UserRole.ADMIN else UserRole.USER
+
+    private fun UserRole.toGraphql() = if (this == UserRole.ADMIN) GraphqlRole.ADMIN else GraphqlRole.USER
 
     private fun Enrollment.toResult(): EnrollResult {
         onEnrolledDevice?.let {

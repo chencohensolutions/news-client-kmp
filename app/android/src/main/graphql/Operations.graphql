@@ -1,4 +1,4 @@
-# What the app asks the news server (news-server-go). The schema next to it is the server's, copied by
+# What the app asks the news server (news-server-core-go). The schema next to it is the server's, copied by
 # ./gradlew :app:android:syncServerSchema.
 
 # --- Enrollment (no certificate yet: @public) ---------------------------------------------------------------------
@@ -208,6 +208,14 @@ fragment ServerSourceFields on Source {
   hasFeed
   feed
   waitMs
+  hidden
+}
+
+# Hides a site from this user's feed or shows it again: their choice, on the server for all their devices.
+mutation SetSourceHidden($id: String!, $hidden: Boolean!) {
+  setSourceHidden(id: $id, hidden: $hidden) {
+    ...ServerSourceFields
+  }
 }
 
 # What the server has done (Settings › שרת החדשות › סטטיסטיקה).
@@ -330,5 +338,87 @@ query ThreadsMap($first: Int) {
         text
       }
     }
+  }
+}
+
+# --- Users and roles -----------------------------------------------------------------------------------------------
+
+# Who this device is: its user, their role (an admin changes the server's settings) and the device's name.
+query Me {
+  me {
+    user
+    role
+    deviceName
+  }
+}
+
+# The read marks this user made, on any of their devices, since a time (all when omitted).
+query ReadArticles($since: Time) {
+  readArticles(since: $since) {
+    url
+    readAt
+  }
+}
+
+# Marks articles read for this user on all their devices (at most 500 at once).
+mutation MarkRead($urls: [String!]!) {
+  markRead(urls: $urls)
+}
+
+# Admins only (FORBIDDEN to others): the users and their devices, invites, roles, revoking and removing.
+query Users {
+  users {
+    ...ServerUser
+  }
+}
+
+fragment ServerUser on User {
+  name
+  role
+  devices {
+    serial
+    name
+    keyProtection
+    registeredAt
+    expiresAt
+    revokedAt
+    current
+  }
+}
+
+mutation CreateInvite($user: String!, $role: Role) {
+  createInvite(user: $user, role: $role) {
+    code
+    user
+    role
+    expiresAt
+    link
+  }
+}
+
+mutation SetUserRole($user: String!, $role: Role!) {
+  setUserRole(user: $user, role: $role) {
+    ...ServerUser
+  }
+}
+
+mutation RevokeDevice($serial: String!) {
+  revokeDevice(serial: $serial) {
+    serial
+    revokedAt
+  }
+}
+
+mutation RemoveUser($user: String!) {
+  removeUser(user: $user)
+}
+
+# --- Video ---------------------------------------------------------------------------------------------------------
+
+# An article's video, played through the server: a path on it (HLS or MP4), or null (then the embed in a web view).
+query VideoStream($url: String!) {
+  videoStream(url: $url) {
+    path
+    hls
   }
 }
