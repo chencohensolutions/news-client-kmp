@@ -169,7 +169,8 @@ class NewsServer(
         start(address, link.code, link.fingerprint, link)
     }
 
-    private fun start(address: String, code: String, fingerprint: String?, link: EnrollmentLink? = null) {
+    private fun start(address: String, typedCode: String, fingerprint: String?, link: EnrollmentLink? = null) {
+        val code = withoutInvisibles(typedCode).trim()
         val url = serverUrl(address)
         if (url == null) {
             _state.value = ServerState.NotConnected(address, code, ServerError.BAD_ADDRESS)
