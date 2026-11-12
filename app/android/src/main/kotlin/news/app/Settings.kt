@@ -17,6 +17,11 @@ data class AppSettings(
     val sentenceLines: Boolean = true,
     /** How many of a generated story's sentences its card in the feed shows; 0: all of them. Its page shows all. */
     val feedSentences: Int = 3,
+    /**
+     * A generated story shows once in the feed, at its newest version ([newestVersionsOnly]): the server's groups that
+     * are versions of one story (the same id) are one card; the earlier versions and what each changed are on its page.
+     */
+    val newestVersionOnly: Boolean = true,
     /** The sentence a related story shows under its title (סיפורים קשורים, the map's story). */
     val relatedLine: RelatedLine = RelatedLine.MOST_CITED,
     /** Labels under the feed's title for the sites and categories picked (with an ✕ each); hidden by default. */
@@ -117,6 +122,7 @@ class SettingsStore(context: Context) {
             pictureBelowText = prefs.getBoolean(PICTURE_BELOW_TEXT, defaults.pictureBelowText),
             sentenceLines = prefs.getBoolean(SENTENCE_LINES, defaults.sentenceLines),
             feedSentences = prefs.getInt(FEED_SENTENCES, defaults.feedSentences),
+            newestVersionOnly = prefs.getBoolean(NEWEST_VERSION_ONLY, defaults.newestVersionOnly),
             relatedLine = prefs.getString(RELATED_LINE, null)?.let { n -> RelatedLine.entries.firstOrNull { it.name == n } } ?: defaults.relatedLine,
             sourceLabels = prefs.getString(SOURCE_LABELS, null)?.let { n -> SourceLabels.entries.firstOrNull { it.name == n } } ?: defaults.sourceLabels,
             refreshOnReturnMinutes = prefs.getInt(REFRESH_ON_RETURN_MINUTES, defaults.refreshOnReturnMinutes),
@@ -147,6 +153,7 @@ class SettingsStore(context: Context) {
             .putString(SOURCE_LABELS, settings.sourceLabels.name)
             .putBoolean(SENTENCE_LINES, settings.sentenceLines)
             .putInt(FEED_SENTENCES, settings.feedSentences)
+            .putBoolean(NEWEST_VERSION_ONLY, settings.newestVersionOnly)
             .putString(RELATED_LINE, settings.relatedLine.name)
             .putInt(REFRESH_ON_RETURN_MINUTES, settings.refreshOnReturnMinutes)
             .putStringSet(NOTIFY_SOURCES, settings.notifySources)
@@ -205,6 +212,7 @@ class SettingsStore(context: Context) {
         const val SOURCE_LABELS = "source_labels"
         const val SENTENCE_LINES = "sentence_lines_v2"
         const val FEED_SENTENCES = "feed_sentences"
+        const val NEWEST_VERSION_ONLY = "newest_version_only"
         const val RELATED_LINE = "related_line"
         const val REFRESH_ON_RETURN_MINUTES = "refresh_on_return_minutes"
         const val NOTIFY_SOURCES = "notify_sources"

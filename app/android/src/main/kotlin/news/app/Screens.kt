@@ -233,18 +233,26 @@ fun HeadlinesScreen(
     onOnlyGenerated: (Boolean) -> Unit = {},
     /** "חדש עד" ([AppSettings.newWithinHours]): which generated stories the חדשים badge counts. */
     newWithinHours: Int = 0,
+    /** [AppSettings.newestVersionOnly]: each generated story once, at its newest version ([newestVersionsOnly]). */
+    newestVersionOnly: Boolean = true,
+    /** A generated story's "גרסה N": its versions. */
+    onVersions: (StorySummary) -> Unit = {},
 ) {
     // With the server's generated articles, the חדשים badge counts the generated stories still to read, not headlines.
     val generated = state.summaries.isNotEmpty()
+    // The stories: one card a generated story, at its newest version, unless the setting is off.
+    val stories = remember(feed.all, state.summaries, newestVersionOnly) {
+        if (generated && newestVersionOnly) newestVersionsOnly(feed.all, state.summaries) else feed.all
+    }
     // Like the headlines' count: a story scrolled past (no report still new to the owner) no longer counts either.
-    val unreadStories = remember(feed.all, state.summaries, state.storiesOpened, newWithinHours, feed.markedNew) {
+    val unreadStories = remember(stories, state.summaries, state.storiesOpened, newWithinHours, feed.markedNew) {
         if (!generated) emptySet()
-        else unreadGenerated(feed.all, state.summaries, state.storiesOpened, newWithinHours)
+        else unreadGenerated(stories, state.summaries, state.storiesOpened, newWithinHours)
             .filter { s -> s.reports.any { it.url in feed.markedNew } }.mapTo(HashSet()) { it.lead.url }
     }
     // What the list shows: only the stories with a generated article (the default) or all; the new ones first, then a
     // quiet "עד כאן החדשים" after the last new one, so scrolling down shows where the new ones end.
-    val shown = if (generated && state.onlyGenerated) feed.all.filter { s -> s.reports.any { it.url in state.summaries } } else feed.all
+    val shown = if (generated && state.onlyGenerated) stories.filter { s -> s.reports.any { it.url in state.summaries } } else stories
     val isNew = { s: Story -> if (generated && state.onlyGenerated) s.lead.url in unreadStories else s.reports.any { it.url in feed.markedNew } }
     val lastNew = shown.indexOfLast(isNew)
     val newEnd = !state.onlyNew && lastNew >= 0 && lastNew < shown.lastIndex
@@ -627,6 +635,7 @@ fun HeadlinesScreen(
                             original = state.showOriginal != (story.lead.url in state.flipped),
                             onFlip = { onFlip(story.lead.url) },
                             generatedUnread = story.lead.url in unreadStories,
+                            onVersions = { story.reports.firstNotNullOfOrNull { state.summaries[it.url] }?.let(onVersions) },
                         )
                     }
                     items(if (newEnd) shown.take(lastNew + 1) else shown, key = { "story-" + it.lead.url }) { storyRow(it) }
@@ -849,6 +858,8 @@ private fun StoryItem(
     onFlip: () -> Unit = {},
     /** With a [summary]: still to read as a generated story ([unreadGenerated]); its "חדש" goes by this. */
     generatedUnread: Boolean = false,
+    /** With a [summary] written more than once: its versions. */
+    onVersions: (() -> Unit)? = null,
 ) {
     val lead = reports.first()
     val leadRead = lead.url in read
@@ -903,7 +914,8 @@ private fun StoryItem(
             if (summary != null) {
                 GeneratedPart(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary, onFootnote, sourceLabels, sentenceLines, onThread,
                     maxSentences = feedSentences,
-                    badge = if (generatedView && generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null)
+                    badge = if (generatedView && generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null,
+                    onVersions = onVersions)
             } else {
                 Text(
                     lead.title,

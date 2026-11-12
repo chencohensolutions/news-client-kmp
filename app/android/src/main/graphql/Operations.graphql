@@ -81,26 +81,54 @@ query Stories {
         url
       }
       summary {
-        title
-        sentences {
-          ...ServerSentence
-        }
-        contradictions {
-          ...ServerSentence
-        }
-        unrelated
-        reports
-        headlineOnly
-        writtenAt
-        writtenWith {
-          fullArticles
-          length
-        }
-        id
+        ...ServerStorySummary
         threads {
           ...ServerThreadRef
         }
       }
+    }
+  }
+}
+
+# Every version of a story, newest first, each with what it changed from the one before.
+query StoryVersions($id: ID!) {
+  storyVersions(id: $id) {
+    ...ServerStorySummary
+  }
+}
+
+fragment ServerStorySummary on StorySummary {
+  title
+  sentences {
+    ...ServerSentence
+  }
+  contradictions {
+    ...ServerSentence
+  }
+  unrelated
+  reports
+  headlineOnly
+  writtenAt
+  writtenWith {
+    fullArticles
+    length
+  }
+  id
+  version
+  versions
+  current
+  changes {
+    since
+    title
+    sentences {
+      kind
+      parts {
+        text
+        added
+      }
+    }
+    removed {
+      ...ServerSentence
     }
   }
 }
