@@ -212,10 +212,10 @@ fun SummaryArticleScreen(
     onBack: () -> Unit,
     /** The articles of the story's reports, as they come in: its pictures and videos, each with its site. */
     articles: Map<String, news.core.model.Article> = emptyMap(),
-    /** The end of the page: its threads and their earlier and later stories ([ThreadRelated]). */
-    related: @Composable () -> Unit = {},
     /** The story's versions ([StoryVersionsScreen]); null: no link to them. */
     onVersions: (() -> Unit)? = null,
+    /** The end of the page: its threads and their earlier and later stories ([ThreadRelated]). Last: a trailing lambda. */
+    related: @Composable () -> Unit = {},
 ) {
     // What this version changed from the one before, marked in the text; the note's switch takes the marker off.
     var marked by rememberSaveable(summary.id, summary.writtenAt.toEpochMilliseconds()) { mutableStateOf(true) }
