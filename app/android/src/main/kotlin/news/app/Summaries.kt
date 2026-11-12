@@ -268,12 +268,11 @@ fun SummaryArticleScreen(
                 if (media.isNotEmpty()) StoryMedia(media, names, onFootnote)
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     HorizontalDivider()
-                    // The reports Gemini read (the cited ones for a story written before the server said); the rest of the
-                    // story's, unread, in one quiet line under them.
-                    val (readReports, unread) = readAndUnread(story, summary)
-                    val read = numbered + readReports.filter { r -> numbered.none { it.url == r.url } }
-                        .map { Footnote(it.url, it.sourceId, it.title, it.video, it.publishedAt) }
-                    Sources(read, names, onFootnote, { url -> story.reports.firstOrNull { it.url == url }?.publishedAt }, summary.headlineOnly.toSet())
+                    // The sources are the articles the text cites. The story's sites it doesn't cite (their articles read
+                    // without a fact taken from them, or not read) go in one quiet line under them.
+                    val citingSites = numbered.mapNotNullTo(HashSet()) { it.sourceId }
+                    val unread = story.reports.filter { r -> r.url !in summary.unrelated && r.sourceId !in citingSites && numbered.none { it.url == r.url } }
+                    Sources(numbered, names, onFootnote, { url -> story.reports.firstOrNull { it.url == url }?.publishedAt }, summary.headlineOnly.toSet())
                     if (unread.isNotEmpty()) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("בסיפור גם:", style = MaterialTheme.typography.labelMedium, color = muted)
