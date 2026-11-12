@@ -31,6 +31,16 @@ class ThreadStoryPageTest {
     }
 
     @Test
+    fun aStoryIsPlacedNewestFirstByItsLatestReport() {
+        val later = at.plus(kotlin.time.Duration.parse("26h"))
+        val longRunning = story().copy(firstReportAt = at, lastReportAt = later)
+        assertEquals(at, longRunning.startedAt)
+        assertEquals(later, longRunning.latestAt)
+        // No later report: where it began.
+        assertEquals(at, story().copy(firstReportAt = at).latestAt)
+    }
+
+    @Test
     fun noFootnotesNoPage() {
         assertNull(threadStoryPage(story(Sentence("One.", emptyList())), null))
     }
