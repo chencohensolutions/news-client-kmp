@@ -74,6 +74,9 @@ sealed interface ThreadLayer {
      * ([summary], its reports from its footnotes).
      */
     data class Article(val story: news.app.stories.Story, val summary: news.app.server.StorySummary? = null) : ThreadLayer
+
+    /** A generated story's versions ([StoryVersionsScreen]), story [id] titled [title]. */
+    data class Versions(val id: String, val title: String) : ThreadLayer
 }
 
 /**

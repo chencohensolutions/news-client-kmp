@@ -41,6 +41,8 @@ import news.app.server.graphql.fragment.ServerUser as ServerUserFields
 import news.app.server.graphql.type.Role as GraphqlRole
 import news.app.server.graphql.fragment.ServerSourceFields
 import news.app.server.graphql.StoriesQuery
+import news.app.server.graphql.StoryVersionsQuery
+import news.app.server.graphql.fragment.ServerStorySummary
 import news.app.server.graphql.fragment.Enrollment
 import news.app.server.graphql.fragment.ServerArticle
 import news.app.server.graphql.type.EnrollDeviceInput
@@ -154,7 +156,38 @@ data class StorySummary(
     val reports: List<String> = emptyList(),
     /** Of [reports], those read only by title and subtitle (a paywall stub, or no article). */
     val headlineOnly: List<String> = emptyList(),
+    /** Which version of the story this is, 1 for the first, of [versions] so far ([ServerApi.storyVersions]). */
+    val version: Int = 1,
+    val versions: Int = 1,
+    /**
+     * Written from the story's reports as they are. False while reports that joined it wait for its next version on the
+     * server: this is the version before, and a new one follows.
+     */
+    val current: Boolean = true,
+    /** What it changed from the version before; null for a first version, or from an older server. */
+    val changes: StoryChanges? = null,
 )
+
+/** What a version of a story changed from the version before it ([since]; its title was [title]). */
+@kotlinx.serialization.Serializable
+data class StoryChanges(
+    @kotlinx.serialization.Serializable(with = news.core.model.InstantIsoSerializer::class) val since: Instant,
+    val title: String,
+    /** One for each of the version's sentences, in order. */
+    val sentences: List<SentenceChange>,
+    /** The version before's sentences this one has nothing like. */
+    val removed: List<Sentence> = emptyList(),
+)
+
+/** How a sentence differs from the closest one before: its text in [parts], the [TextPart.added] ones new. */
+@kotlinx.serialization.Serializable
+data class SentenceChange(val kind: ChangeKind, val parts: List<TextPart>)
+
+@kotlinx.serialization.Serializable
+enum class ChangeKind { SAME, CHANGED, NEW }
+
+@kotlinx.serialization.Serializable
+data class TextPart(val text: String, val added: Boolean)
 
 /**
  * How often the server writes a story again: at most every [minutes] (0: at every change), at once when a new site
@@ -274,6 +307,9 @@ interface ServerApi {
 
     /** The stories, each its reports' URLs and generated article; empty before the first grouping or with stories off. */
     suspend fun stories(): List<ServerStory>
+
+    /** Every version of story [id] ([StorySummary.id]), newest first; empty when the server has none. */
+    suspend fun storyVersions(id: String): List<StorySummary> = emptyList()
 
     /** Whether Gemini reads the full articles for the summaries; null with summaries off. */
     suspend fun fullArticles(): Boolean? = null
@@ -397,22 +433,41 @@ class ApolloServerApi(url: String, http: OkHttpClient) : ServerApi {
         run { query(StoriesQuery()).execute() }.stories.stories.map { story ->
             ServerStory(
                 urls = story.reports.map { it.url },
-                summary = story.summary?.let { s ->
-                    StorySummary(
-                        s.title,
-                        s.sentences.map { it.serverSentence.toSentence() },
-                        s.contradictions.map { it.serverSentence.toSentence() },
-                        Instant.parse(s.writtenAt),
-                        s.unrelated,
-                        s.id,
-                        s.threads.map { it.serverThreadRef.toRef() },
-                        s.writtenWith?.let { WrittenWith(it.fullArticles, it.length.rawValue) },
-                        s.reports,
-                        s.headlineOnly,
-                    )
-                },
+                summary = story.summary?.let { s -> s.serverStorySummary.toStorySummary().copy(threads = s.threads.map { it.serverThreadRef.toRef() }) },
             )
         }
+
+    override suspend fun storyVersions(id: String): List<StorySummary> =
+        run { query(StoryVersionsQuery(id)).execute() }.storyVersions.map { it.serverStorySummary.toStorySummary() }
+
+    private fun ServerStorySummary.toStorySummary() = StorySummary(
+        title,
+        sentences.map { it.serverSentence.toSentence() },
+        contradictions.map { it.serverSentence.toSentence() },
+        Instant.parse(writtenAt),
+        unrelated,
+        id,
+        emptyList(),
+        writtenWith?.let { WrittenWith(it.fullArticles, it.length.rawValue) },
+        reports,
+        headlineOnly,
+        version = version,
+        versions = versions,
+        current = current,
+        changes = changes?.let { c ->
+            StoryChanges(
+                Instant.parse(c.since),
+                c.title,
+                c.sentences.map { sc ->
+                    SentenceChange(
+                        when (sc.kind.rawValue) { "SAME" -> ChangeKind.SAME; "CHANGED" -> ChangeKind.CHANGED; else -> ChangeKind.NEW },
+                        sc.parts.map { TextPart(it.text, it.added) },
+                    )
+                },
+                c.removed.map { it.serverSentence.toSentence() },
+            )
+        },
+    )
 
     override suspend fun fullArticles(): Boolean? = run { query(SummarySettingsQuery()).execute() }.summarySettings?.fullArticles
 
