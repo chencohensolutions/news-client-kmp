@@ -1299,6 +1299,22 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         summary.threads.take(2).forEach { loadThread(it.id) }
     }
 
+    private val _storyVersions = MutableStateFlow<Map<String, List<StorySummary>>>(emptyMap())
+
+    /** The versions of the stories opened ([openVersions]), newest first, by story id; fetched again on each opening. */
+    val storyVersions: StateFlow<Map<String, List<StorySummary>>> = _storyVersions
+
+    /** Opens [summary]'s story's versions over the feed or its page, and fetches them from the server. */
+    fun openVersions(summary: StorySummary) {
+        if (summary.id.isEmpty()) return
+        _threadLayers.update { it + ThreadLayer.Versions(summary.id, summary.title) }
+        viewModelScope.launch {
+            // None when the server doesn't answer: the page says it has none, rather than loading for good.
+            val versions = newsApp.server.storyVersions(summary.id).orEmpty()
+            _storyVersions.update { it + (summary.id to versions) }
+        }
+    }
+
     private fun loadThread(id: String) {
         viewModelScope.launch {
             val page = newsApp.server.thread(id) ?: return@launch

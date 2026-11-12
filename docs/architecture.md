@@ -33,7 +33,8 @@ in the BitTorrent DHT by its key when they all stop answering (`news.app.server.
 ### What stays on the phone
 
 - **Display preferences**: how the feed and the reader look (filter labels, picture placement, the labels of a
-  generated article, sentence lines, what a related story shows, snapping, sticky video), what counts as new,
+  generated article, sentence lines, one card a story at its newest version, what a related story shows, snapping,
+  sticky video), what counts as new,
   prefetching pictures while scrolling and reading, notifications, and when to refresh. In `AppSettings`
   ([Settings.kt](../app/android/src/main/kotlin/news/app/Settings.kt)).
 - **Reading state**: read and viewed marks (the read marks also go to the server, to follow the user to their other

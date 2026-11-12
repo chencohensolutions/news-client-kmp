@@ -647,6 +647,24 @@ class NewsServer(
         }
     }
 
+    /**
+     * Every version of story [id], newest first ([ServerApi.storyVersions]); null when it isn't [inUse] or doesn't
+     * answer.
+     */
+    suspend fun storyVersions(id: String): List<StorySummary>? {
+        val current = account ?: return null
+        return try {
+            call { it.storyVersions(id) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            null
+        } catch (e: Exception) {
+            unreachable(current)
+            null
+        }
+    }
+
     /** How the server groups stories; null when it isn't [inUse], has stories off, or doesn't answer. */
     suspend fun grouping(): ServerGrouping? {
         val current = account ?: return null

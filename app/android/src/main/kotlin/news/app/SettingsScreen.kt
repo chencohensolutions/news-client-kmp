@@ -489,6 +489,12 @@ private fun MainPage(
         onSelect = { onChange(settings.copy(feedSentences = it)) },
     )
     SwitchRow(
+        title = "רק הגרסה האחרונה של כל סיפור",
+        subtitle = "כשסיפור נכתב מחדש (הצטרפו אליו כתבות), הפיד מראה רק את הגרסה החדשה. בדף הכתבה: מה השתנה מהגרסה הקודמת, מודגש, וכל הגרסאות הקודמות. כבוי: כל קבוצת כתבות בכרטיס משלה, גם כשכמה מהן גרסאות של אותו סיפור.",
+        checked = settings.newestVersionOnly,
+        onChange = { onChange(settings.copy(newestVersionOnly = it)) },
+    )
+    SwitchRow(
         title = "כל משפט בשורה חדשה",
         subtitle = "בכתבה מסוכמת, כל משפט מתחיל בשורה חדשה (אחרי תוויות המקורות שלו כשהן בתוך הטקסט). כבוי: פסקה אחת רציפה.",
         checked = settings.sentenceLines,

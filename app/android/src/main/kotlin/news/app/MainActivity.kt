@@ -163,6 +163,7 @@ fun NewsApp(
     val summaryStory by vm.summaryStory.collectAsStateWithLifecycle()
     val threadLayers by vm.threadLayers.collectAsStateWithLifecycle()
     val threadPages by vm.threadPages.collectAsStateWithLifecycle()
+    val storyVersions by vm.storyVersions.collectAsStateWithLifecycle()
     val storyArticles by vm.storyArticles.collectAsStateWithLifecycle()
     val allThreads by vm.allThreads.collectAsStateWithLifecycle()
     val threadsRefreshing by vm.threadsRefreshing.collectAsStateWithLifecycle()
@@ -298,7 +299,7 @@ fun NewsApp(
                     val summary = story?.reports?.firstNotNullOfOrNull { headlines.summaries[it.url] }
                     // A generated article's page, its threads and their stories at the end.
                     val articlePage = @Composable { s: news.app.stories.Story, sum: news.app.server.StorySummary, onBack: () -> Unit ->
-                        SummaryArticleScreen(s, sum, names, onFootnote = vm::openFootnote, onBack = onBack, articles = storyArticles) {
+                        SummaryArticleScreen(s, sum, names, onFootnote = vm::openFootnote, onBack = onBack, articles = storyArticles, onVersions = { vm.openVersions(sum) }) {
                             ThreadRelated(
                                 sum.id, sum.threads, threadPages,
                                 onThread = { vm.openThread(it, sum.id) },
@@ -329,6 +330,7 @@ fun NewsApp(
                             ThreadLayer.All -> ThreadsScreen(allThreads, threadsRefreshing && allThreads != null, vm::refreshThreads, onThread = { vm.openThread(it, null) }, onBack = vm::closeThreadLayer)
                             is ThreadLayer.Article -> (layer.story.reports.firstNotNullOfOrNull { headlines.summaries[it.url] } ?: layer.summary)
                                 ?.let { articlePage(layer.story, it, vm::closeThreadLayer) }
+                            is ThreadLayer.Versions -> StoryVersionsScreen(layer.title, storyVersions[layer.id], names, onFootnote = vm::openFootnote, onBack = vm::closeThreadLayer)
                         }
                     } else if (open == null && story != null && summary != null) {
                         // A generated article as a page, over the feed or the paper.
@@ -377,6 +379,8 @@ fun NewsApp(
                                 onFlip = vm::flipStory,
                                 onOnlyGenerated = vm::showOnlyGenerated,
                                 newWithinHours = settings.newWithinHours,
+                                newestVersionOnly = settings.newestVersionOnly,
+                                onVersions = vm::openVersions,
                             )
                         }
                     } else {
