@@ -61,6 +61,8 @@ data class HeadlinesState(
     val summaries: Map<String, StorySummary> = emptyMap(),
     /** The report URLs of every generated story opened (its card, article page or a source): see [unreadGenerated]. */
     val storiesOpened: Set<String> = emptySet(),
+    /** When each generated story (by its server id) was last opened as a page ([StorySeen]): its card's "עודכן" goes by it. */
+    val storySeen: Map<String, kotlin.time.Instant> = emptyMap(),
     /** The feed's switch: the stories' original headlines instead of their generated articles. */
     val showOriginal: Boolean = false,
     /** Stories (by lead URL) flipped on their own card to the other view than [showOriginal]; cleared when it changes. */
@@ -549,6 +551,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The report URLs of the generated stories opened ([HeadlinesState.storiesOpened]), kept between runs. */
     private val storiesOpenedHistory = ReadHistory(File(app.filesDir, "stories-opened.txt"), limit = 10_000)
+
+    /** When each generated story was last opened as a page ([HeadlinesState.storySeen]), kept between runs. */
+    private val storySeenHistory = StorySeen(File(app.filesDir, "stories-seen.txt"))
     private var viewed: Set<String> = emptySet()
 
     /** When the feed first had each headline: the age of one without a publish time ([newUrlsOf]). */
@@ -685,7 +690,8 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                 viewedHistory.all()
             }
             val storiesOpened = withContext(readDispatcher) { storiesOpenedHistory.all() }
-            _headlines.update { it.copy(storiesOpened = storiesOpened) }
+            val storySeen = withContext(readDispatcher) { storySeenHistory.all() }
+            _headlines.update { it.copy(storiesOpened = storiesOpened, storySeen = storySeen) }
             val saved = withContext(Dispatchers.IO) { newsApp.feedCache.loadHeadlines() }
             if (saved != null && _headlines.value.items.isEmpty()) {
                 val cached = saved.copy(items = admit(saved.items))
@@ -1167,9 +1173,15 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     /** The story whose generated article is open as a page. */
     val summaryStory: StateFlow<Story?> = _summaryStory
 
+    private val _summarySince = MutableStateFlow<kotlin.time.Instant?>(null)
+
+    /** When the story open as a page was opened before this time (null: never): its "מה חדש" is what came after. */
+    val summarySince: StateFlow<kotlin.time.Instant?> = _summarySince
+
     fun showSummary(story: Story?) {
         // Back to the feed: it brings the story's card into view, where it was ([returnTo]).
         if (story == null) _summaryStory.value?.let { _returnTo.value = it.lead.url }
+        if (story != null && story != _summaryStory.value) markStorySeen(story)
         _summaryStory.value = story
         story?.let(::markStoryOpened)
         story?.let(::loadThreadsOf)
@@ -1336,6 +1348,17 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     /** One story, by its lead's URL, to the other view than the feed's switch. */
     fun flipStory(leadUrl: String) {
         _headlines.update { it.copy(flipped = if (leadUrl in it.flipped) it.flipped - leadUrl else it.flipped + leadUrl) }
+    }
+
+    /** [story]'s page opened now: what's new on it is what came since its last opening ([summarySince]). */
+    private fun markStorySeen(story: Story) {
+        val s = _headlines.value
+        val id = story.reports.firstNotNullOfOrNull { s.summaries[it.url] }?.id?.takeIf { it.isNotEmpty() }
+        _summarySince.value = id?.let { s.storySeen[it] }
+        id ?: return
+        val now = kotlin.time.Clock.System.now()
+        _headlines.update { it.copy(storySeen = it.storySeen + (id to now)) }
+        viewModelScope.launch(readDispatcher) { storySeenHistory.open(id, now) }
     }
 
     /** [story] is read, as a generated story: all its reports now, so only a new site makes it unread again. */

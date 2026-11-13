@@ -636,6 +636,9 @@ fun HeadlinesScreen(
                             onFlip = { onFlip(story.lead.url) },
                             generatedUnread = story.lead.url in unreadStories,
                             onVersions = { story.reports.firstNotNullOfOrNull { state.summaries[it.url] }?.let(onVersions) },
+                            update = story.reports.firstNotNullOfOrNull { state.summaries[it.url] }?.let { s ->
+                                cardUpdate(s, s.id.takeIf { it.isNotEmpty() }?.let { state.storySeen[it] })
+                            },
                         )
                     }
                     items(if (newEnd) shown.take(lastNew + 1) else shown, key = { "story-" + it.lead.url }) { storyRow(it) }
@@ -860,6 +863,8 @@ private fun StoryItem(
     generatedUnread: Boolean = false,
     /** With a [summary] written more than once: its versions. */
     onVersions: (() -> Unit)? = null,
+    /** With a [summary]: what's new in it since the last opening ([cardUpdate]); null for nothing. */
+    update: CardUpdate? = null,
 ) {
     val lead = reports.first()
     val leadRead = lead.url in read
@@ -914,8 +919,9 @@ private fun StoryItem(
             if (summary != null) {
                 GeneratedPart(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary, onFootnote, sourceLabels, sentenceLines, onThread,
                     maxSentences = feedSentences,
-                    badge = if (generatedView && generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null,
-                    onVersions = onVersions)
+                    badge = if (generatedView && generatedUnread && update == null) (if (storyRead) "דיווח חדש" else "חדש") else null,
+                    onVersions = onVersions,
+                    update = update)
             } else {
                 Text(
                     lead.title,

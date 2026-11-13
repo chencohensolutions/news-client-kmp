@@ -128,11 +128,14 @@ internal fun GeneratedPart(
     maxSentences: Int = 0,
     /** The story's versions ([StoryVersionsScreen]): with it, a story written more than once shows "גרסה N". */
     onVersions: (() -> Unit)? = null,
+    /** What's new since the last opening: "עודכן" first on its line, and a "חדש:" line under the title. */
+    update: CardUpdate? = null,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (!original) {
+                if (update != null) UpdatedBadge()
                 badge?.let { NewBadge(it) }
                 Icon(Icons.Filled.AutoAwesome, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                 Text(if (sites == 1) "כתבה מאתר אחד" else "כתבה מ־$sites אתרים", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -150,6 +153,7 @@ internal fun GeneratedPart(
         } else {
             // The whole article as clean text, then what the sites disagree on, then its sources once each.
             Text(summary.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onArticle))
+            update?.line?.let { UpdateLine(it, update.others, names, onArticle) }
             val cut = maxSentences > 0 && summary.sentences.size > maxSentences
             val sentences = if (cut) summary.sentences.take(maxSentences) else summary.sentences
             val contradictions = if (cut) emptyList() else summary.contradictions
@@ -214,11 +218,11 @@ fun SummaryArticleScreen(
     articles: Map<String, news.core.model.Article> = emptyMap(),
     /** The story's versions ([StoryVersionsScreen]); null: no link to them. */
     onVersions: (() -> Unit)? = null,
+    /** What's new since the reader last opened it ([whatsNew]): a block over the text; null on a first visit. */
+    whatsNew: WhatsNew? = null,
     /** The end of the page: its threads and their earlier and later stories ([ThreadRelated]). Last: a trailing lambda. */
     related: @Composable () -> Unit = {},
 ) {
-    // What this version changed from the one before, marked in the text; the note's switch takes the marker off.
-    var marked by rememberSaveable(summary.id, summary.writtenAt.toEpochMilliseconds()) { mutableStateOf(true) }
     val numbered = numbering(summary.sentences + summary.contradictions)
     val context = LocalContext.current
     val sites = citedSites(story, summary)
@@ -276,13 +280,11 @@ fun SummaryArticleScreen(
                     if (!summary.current) {
                         Text("כתבות חדשות הצטרפו לסיפור: גרסה מעודכנת תיכתב בקרוב.", style = MaterialTheme.typography.labelMedium, color = muted)
                     }
-                    summary.changes?.let { ChangesNote(it, summary.title, marked) { marked = !marked } }
+                    // What came since the last visit, over the text; the text itself unmarked.
+                    whatsNew?.let { WhatsNewBlock(it, names, onFootnote) }
                     // The sites' labels in the text after each sentence, as the feed's inline labels.
                     val body = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 32.sp)
-                    summary.sentences.forEachIndexed { i, sentence ->
-                        Inline(listOf(sentence), names, onFootnote, body, changes = if (marked) listOf(summary.changes?.sentences?.getOrNull(i)) else emptyList())
-                    }
-                    if (marked) summary.changes?.let { Removed(it.removed) }
+                    summary.sentences.forEach { sentence -> Inline(listOf(sentence), names, onFootnote, body) }
                     if (summary.contradictions.isNotEmpty()) {
                         Disagreements(summary.contradictions) { Inline(listOf(it), names, onFootnote, MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp)) }
                     }
