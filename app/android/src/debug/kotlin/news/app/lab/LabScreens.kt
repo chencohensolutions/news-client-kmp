@@ -110,6 +110,17 @@ internal val labScreens: List<LabScreen> = listOf(
             SummaryArticleScreen(s.story, s.toStorySummary(), PreviewData.sites.associate { it.id to it.name }, onFootnote = {}, onBack = {})
         },
     )),
+    LabScreen("whats-new", "Generated articles: what's new (מה חדש)", listOf(
+        current {
+            news.app.SummaryArticleScreen(news.app.WhatsNewSample.story, news.app.WhatsNewSample.summary, news.app.WhatsNewSample.names, onFootnote = {}, onBack = {}, onVersions = {})
+        },
+        whatsNewOptionA,
+        whatsNewOptionAFirst,
+        whatsNewOptionAQuiet,
+        whatsNewOptionB,
+        whatsNewOptionC,
+        whatsNewOptionCPage,
+    )),
     LabScreen("settings", "Settings", listOf(
         current { SettingsLab() },
         LabOption("topics", "Topic search", "Four saved topics, two on; the threshold slider") {
