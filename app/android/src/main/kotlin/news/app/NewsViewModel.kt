@@ -12,6 +12,7 @@ import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -72,6 +73,11 @@ data class HeadlinesState(
     /** The phone is enrolled with the server, whether or not it answers now. */
     val serverOn: Boolean = false,
     val refreshing: Boolean = false,
+    /**
+     * The saved feed is still being read at launch: the feed shows a fetching line rather than "no headlines" until
+     * it is in (or there was none).
+     */
+    val starting: Boolean = true,
     /** Source ids the server doesn't read: their earlier headlines hidden. */
     val hiddenSources: Set<String> = emptySet(),
     /** The one view the app has now, "הכל"; the others' code paths remain for the tests and the reader's order. */
@@ -620,8 +626,12 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     /** The headlines [admit] filled from their saved articles in this run of the app: each is read once. */
     private val filledFromSaved = HashSet<String>()
 
-    /** Makes [items] the listed headlines and returns the feed of them: those whose article is on the phone. */
-    private suspend fun admit(items: List<ArticleSummary>): List<ArticleSummary> {
+    /**
+     * Makes [items] the listed headlines and returns the feed of them: those whose article is on the phone. [fill]: also
+     * fills each from its saved article (once per run); without it (the saved feed at launch, shown at once) that is
+     * left to [fillFromSaved].
+     */
+    private suspend fun admit(items: List<ArticleSummary>, fill: Boolean = true): List<ArticleSummary> {
         val done = HashSet(filledFromSaved)
         val (here, filled) = withContext(Dispatchers.IO) {
             val here = HashSet<String>()
@@ -633,16 +643,44 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                 // refresh, a run that ran out of time) kept its list page's data, and one filled by an older build
                 // lacks what it learned to read since (the video mark): the subtitle, picture, time and video from
                 // the article, as the list page's are not.
-                if (item.url !in done) repository.savedArticle(item.url)?.let { filled[item.url] = item.filledFrom(it) }
+                if (fill && item.url !in done) repository.savedArticle(item.url)?.let { filled[item.url] = item.filledFrom(it) }
             }
             here to filled
         }
-        filledFromSaved.addAll(here)
+        if (fill) filledFromSaved.addAll(here)
         listed = items.map { filled[it.url] ?: it }
         newsApp.mediaDates.noteHeadlines(listed)
         onPhone.clear()
         onPhone.addAll(here)
         return listed.filter { it.url in onPhone }
+    }
+
+    /**
+     * After the saved feed shows at launch ([admit] without filling): its headlines filled from their saved articles, as
+     * [admit] does once per run, in the background, the feed and its stories updated with those that changed. Left to the
+     * refresh's own [admit] when a refresh replaced the listed headlines meanwhile.
+     */
+    private fun fillFromSaved() {
+        viewModelScope.launch {
+            val base = listed
+            val todo = base.filter { it.url in onPhone && it.url !in filledFromSaved }
+            if (todo.isEmpty()) return@launch
+            val changed = withContext(Dispatchers.IO) {
+                todo.mapNotNull { item -> repository.savedArticle(item.url)?.let(item::filledFrom)?.takeIf { it != item }?.let { item.url to it } }.toMap()
+            }
+            if (listed !== base) return@launch
+            filledFromSaved.addAll(todo.map { it.url })
+            if (changed.isEmpty()) return@launch
+            listed = listed.map { changed[it.url] ?: it }
+            newsApp.mediaDates.noteHeadlines(changed.values.toList())
+            val fix = { list: List<ArticleSummary> -> list.map { changed[it.url] ?: it } }
+            _headlines.update { s ->
+                s.copy(
+                    items = listed.filter { it.url in onPhone },
+                    stories = (s.stories as? StoriesState.Ready)?.let { r -> r.copy(stories = r.stories.map { Story(fix(it.reports)) }, forItems = fix(r.forItems)) } ?: s.stories,
+                )
+            }
+        }
     }
 
     /**
@@ -675,6 +713,8 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         // The last feed (from the app or the background refresh) shows at once, with the stories saved for it, so
         // Stories opens without the network; the refresh then replaces it.
         val restore = viewModelScope.launch {
+            // The saved feed is read alongside the histories, not after them.
+            val savedFeed = async(Dispatchers.IO) { newsApp.feedCache.loadHeadlines() }
             viewed = withContext(readDispatcher) {
                 // Before the viewed list (an update from the seen snapshot): what the feed holds now counts as viewed,
                 // so it doesn't all turn new at once.
@@ -686,9 +726,11 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
             }
             val storiesOpened = withContext(readDispatcher) { storiesOpenedHistory.all() }
             _headlines.update { it.copy(storiesOpened = storiesOpened) }
-            val saved = withContext(Dispatchers.IO) { newsApp.feedCache.loadHeadlines() }
+            val saved = savedFeed.await()
             if (saved != null && _headlines.value.items.isEmpty()) {
-                val cached = saved.copy(items = admit(saved.items))
+                // At once: which are on the phone only; filling them from their saved articles (reading every one)
+                // follows in the background.
+                val cached = saved.copy(items = admit(saved.items, fill = false))
                 val fresh = newOf(listed, _headlines.value.read)
                 _headlines.update { s ->
                     if (s.items.isNotEmpty()) {
@@ -703,7 +745,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     }
                 }
+                fillFromSaved()
             }
+            _headlines.update { it.copy(starting = false) }
             // Nothing saved for Stories: group the cached feed now rather than after the network answers.
             if (_headlines.value.view.groupsStories) findStories()
         }
@@ -1824,7 +1868,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         const val FLUSH_MS = 1_000L
 
         /** How long a refresh waits for the new headlines' articles before grouping them ([articlesOf]). */
-        const val NEW_ARTICLES_MS = 60_000L
+        const val NEW_ARTICLES_MS = 20_000L
 
         /** How long after a grouping change the server's stories are asked for again: it regroups in a few seconds. */
         const val REGROUP_WAIT_MS = 6_000L

@@ -146,7 +146,7 @@ private fun HeadlinesLab(
             HeadlinesState(
                 items = items.distinctBy { it.url }, failures = failures, view = view, stories = stories, read = read,
                 refreshedAt = if (items.isEmpty()) null else PreviewData.refreshedAt, newUrls = newUrls, onlyNew = onlyNew, sites = sites,
-                categories = categories, summaries = summaries,
+                categories = categories, summaries = summaries, starting = false,
             ),
         )
     }
