@@ -43,6 +43,9 @@ import news.app.server.graphql.fragment.ServerUser as ServerUserFields
 import news.app.server.graphql.type.Role as GraphqlRole
 import news.app.server.graphql.fragment.ServerSourceFields
 import news.app.server.graphql.StoriesQuery
+import news.app.server.graphql.StoriesWithKindsQuery
+import news.app.server.graphql.StoriesWithUpdatesQuery
+import news.app.server.graphql.fragment.ServerStoryUpdate
 import news.app.server.graphql.StoryVersionsQuery
 import news.app.server.graphql.fragment.ServerStorySummary
 import news.app.server.graphql.fragment.Enrollment
@@ -177,30 +180,24 @@ data class StorySummary(
      * server: this is the version before, and a new one follows.
      */
     val current: Boolean = true,
-    /** What it changed from the version before; null for a first version, or from an older server. */
-    val changes: StoryChanges? = null,
+    /**
+     * How the story unfolded, oldest first: its first version, then what each later version added; empty from an older
+     * server, or from the versions screen's query.
+     */
+    val updates: List<StoryUpdate> = emptyList(),
 )
 
-/** What a version of a story changed from the version before it ([since]; its title was [title]). */
+/**
+ * What one version of a story added ([sentences]) and when; [kinds] says what each sentence is (development,
+ * correction, detail, background, reaction), empty for a version written whole or from a server before kinds.
+ */
 @kotlinx.serialization.Serializable
-data class StoryChanges(
-    @kotlinx.serialization.Serializable(with = news.core.model.InstantIsoSerializer::class) val since: Instant,
-    val title: String,
-    /** One for each of the version's sentences, in order. */
-    val sentences: List<SentenceChange>,
-    /** The version before's sentences this one has nothing like. */
-    val removed: List<Sentence> = emptyList(),
+data class StoryUpdate(
+    @kotlinx.serialization.Serializable(with = news.core.model.InstantIsoSerializer::class) val at: Instant,
+    val sentences: List<Sentence>,
+    val kinds: List<String> = emptyList(),
 )
 
-/** How a sentence differs from the closest one before: its text in [parts], the [TextPart.added] ones new. */
-@kotlinx.serialization.Serializable
-data class SentenceChange(val kind: ChangeKind, val parts: List<TextPart>)
-
-@kotlinx.serialization.Serializable
-enum class ChangeKind { SAME, CHANGED, NEW }
-
-@kotlinx.serialization.Serializable
-data class TextPart(val text: String, val added: Boolean)
 
 /**
  * How often the server writes a story again: at most every [minutes] (0: at every change), at once when a new site
@@ -469,13 +466,56 @@ class ApolloServerApi(url: String, http: OkHttpClient) : ServerApi {
     override suspend fun articles(urls: List<String>): List<Article> =
         run { query(ArticlesQuery(urls.take(ServerApi.MAX_ARTICLES))).execute() }.articles.map { it.serverArticle.toArticle() }
 
-    override suspend fun stories(): List<ServerStory> =
-        run { query(StoriesQuery()).execute() }.stories.stories.map { story ->
-            ServerStory(
-                urls = story.reports.map { it.url },
-                summary = story.summary?.let { s -> s.serverStorySummary.toStorySummary().copy(threads = s.threads.map { it.serverThreadRef.toRef() }) },
-            )
+    /**
+     * Which stories query this server takes: 0 with updates and their kinds, 1 with updates only, 2 neither (an older
+     * server refuses a field it doesn't have). Found on the first call, then kept.
+     */
+    @Volatile private var storiesLevel = 0
+
+    override suspend fun stories(): List<ServerStory> {
+        while (true) {
+            try {
+                return when (storiesLevel) {
+                    0 -> run { query(StoriesWithKindsQuery()).execute() }.stories.stories.map { story ->
+                        val s = story.summary
+                        ServerStory(
+                            story.reports.map { it.url },
+                            s?.serverStorySummary?.toStorySummary()?.copy(
+                                threads = s.threads.map { it.serverThreadRef.toRef() },
+                                updates = s.updates.map { it.serverStoryUpdate.toUpdate(it.kinds) },
+                            ),
+                        )
+                    }
+                    1 -> run { query(StoriesWithUpdatesQuery()).execute() }.stories.stories.map { story ->
+                        val s = story.summary
+                        ServerStory(
+                            story.reports.map { it.url },
+                            s?.serverStorySummary?.toStorySummary()?.copy(
+                                threads = s.threads.map { it.serverThreadRef.toRef() },
+                                updates = s.updates.map { it.serverStoryUpdate.toUpdate(emptyList()) },
+                            ),
+                        )
+                    }
+                    else -> run { query(StoriesQuery()).execute() }.stories.stories.map { story ->
+                        ServerStory(
+                            urls = story.reports.map { it.url },
+                            summary = story.summary?.let { s -> s.serverStorySummary.toStorySummary().copy(threads = s.threads.map { it.serverThreadRef.toRef() }) },
+                        )
+                    }
+                }
+            } catch (e: ServerException) {
+                if (storiesLevel >= 2 || !unknownField(e)) throw e
+                storiesLevel++
+            }
         }
+    }
+
+    /** The server refused the query for a field its schema doesn't have. */
+    private fun unknownField(e: ServerException) =
+        e.code == "GRAPHQL_VALIDATION_FAILED" || e.message.orEmpty().contains("Cannot query field")
+
+    private fun ServerStoryUpdate.toUpdate(kinds: List<String>) =
+        StoryUpdate(Instant.parse(at), sentences.map { it.serverSentence.toSentence() }, kinds)
 
     override suspend fun storyVersions(id: String): List<StorySummary> =
         run { query(StoryVersionsQuery(id)).execute() }.storyVersions.map { it.serverStorySummary.toStorySummary() }
@@ -494,19 +534,6 @@ class ApolloServerApi(url: String, http: OkHttpClient) : ServerApi {
         version = version,
         versions = versions,
         current = current,
-        changes = changes?.let { c ->
-            StoryChanges(
-                Instant.parse(c.since),
-                c.title,
-                c.sentences.map { sc ->
-                    SentenceChange(
-                        when (sc.kind.rawValue) { "SAME" -> ChangeKind.SAME; "CHANGED" -> ChangeKind.CHANGED; else -> ChangeKind.NEW },
-                        sc.parts.map { TextPart(it.text, it.added) },
-                    )
-                },
-                c.removed.map { it.serverSentence.toSentence() },
-            )
-        },
     )
 
     override suspend fun fullArticles(): Boolean? = run { query(SummarySettingsQuery()).execute() }.summarySettings?.fullArticles

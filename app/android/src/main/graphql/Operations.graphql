@@ -90,7 +90,57 @@ query Stories {
   }
 }
 
-# Every version of a story, newest first, each with what it changed from the one before.
+# Stories with what each version added and the kind of each added sentence: the what's new on cards and pages. A server
+# from before kinds refuses it, and the app asks StoriesWithUpdates, then Stories ([ApolloServerApi.stories]).
+query StoriesWithKinds {
+  stories {
+    groupedAt
+    stories {
+      reports {
+        url
+      }
+      summary {
+        ...ServerStorySummary
+        threads {
+          ...ServerThreadRef
+        }
+        updates {
+          ...ServerStoryUpdate
+          kinds
+        }
+      }
+    }
+  }
+}
+
+query StoriesWithUpdates {
+  stories {
+    groupedAt
+    stories {
+      reports {
+        url
+      }
+      summary {
+        ...ServerStorySummary
+        threads {
+          ...ServerThreadRef
+        }
+        updates {
+          ...ServerStoryUpdate
+        }
+      }
+    }
+  }
+}
+
+fragment ServerStoryUpdate on StoryUpdate {
+  at
+  sentences {
+    ...ServerSentence
+  }
+}
+
+# Every version of a story, newest first.
 query StoryVersions($id: ID!) {
   storyVersions(id: $id) {
     ...ServerStorySummary
@@ -117,20 +167,6 @@ fragment ServerStorySummary on StorySummary {
   version
   versions
   current
-  changes {
-    since
-    title
-    sentences {
-      kind
-      parts {
-        text
-        added
-      }
-    }
-    removed {
-      ...ServerSentence
-    }
-  }
 }
 
 # A thread as a story's card or a related thread names it.

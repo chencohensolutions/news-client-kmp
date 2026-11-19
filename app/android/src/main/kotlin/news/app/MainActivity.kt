@@ -161,6 +161,7 @@ fun NewsApp(
     val serverStats by vm.serverStats.collectAsStateWithLifecycle()
     val statsLoading by vm.statsLoading.collectAsStateWithLifecycle()
     val summaryStory by vm.summaryStory.collectAsStateWithLifecycle()
+    val summarySince by vm.summarySince.collectAsStateWithLifecycle()
     val threadLayers by vm.threadLayers.collectAsStateWithLifecycle()
     val threadPages by vm.threadPages.collectAsStateWithLifecycle()
     val storyVersions by vm.storyVersions.collectAsStateWithLifecycle()
@@ -306,6 +307,7 @@ fun NewsApp(
                     val articlePage = @Composable { s: news.app.stories.Story, sum: news.app.server.StorySummary, onBack: () -> Unit ->
                         SummaryArticleScreen(
                             s, sum, names, onFootnote = vm::openFootnote, onBack = onBack, articles = storyArticles, onVersions = { vm.openVersions(sum) },
+                            whatsNew = if (s == summaryStory) whatsNew(sum, summarySince) else null,
                             followed = sum.id.takeIf { it.isNotEmpty() }?.let { id -> following.orEmpty().any { it.id == id } },
                             onFollow = { vm.toggleFollow(sum.id, sum.title) },
                         ) {

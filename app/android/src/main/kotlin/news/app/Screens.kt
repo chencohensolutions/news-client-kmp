@@ -648,6 +648,9 @@ fun HeadlinesScreen(
                             onFlip = { onFlip(story.lead.url) },
                             generatedUnread = story.lead.url in unreadStories,
                             onVersions = { story.reports.firstNotNullOfOrNull { state.summaries[it.url] }?.let(onVersions) },
+                            update = story.reports.firstNotNullOfOrNull { state.summaries[it.url] }?.let { s ->
+                                cardUpdate(s, s.id.takeIf { it.isNotEmpty() }?.let { state.storySeen[it] })
+                            },
                         )
                     }
                     items(if (newEnd) shown.take(lastNew + 1) else shown, key = { "story-" + it.lead.url }) { storyRow(it) }
@@ -876,6 +879,8 @@ private fun StoryItem(
     generatedUnread: Boolean = false,
     /** With a [summary] written more than once: its versions. */
     onVersions: (() -> Unit)? = null,
+    /** With a [summary]: what's new in it since the last opening ([cardUpdate]); null for nothing. */
+    update: CardUpdate? = null,
 ) {
     val lead = reports.first()
     val leadRead = lead.url in read
@@ -897,6 +902,10 @@ private fun StoryItem(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+            // What's new since the story was last opened: its newest development or correction, under the title.
+            if (generatedView) update?.line?.let {
+                Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp)) { UpdateLine(it, update.others, names, onSummary) }
+            }
             Spacer(Modifier.height(6.dp))
             // The story's categories: every one among its reports (the lead's first), leaving out reports the story
             // set aside as about something else.
@@ -909,14 +918,15 @@ private fun StoryItem(
                 if (leadRead) ReadMark(animate = lead.url in justRead)
             }
             val badge = when {
-                summary != null -> if (generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null
+                // An updated story says עודכן instead.
+                summary != null -> if (generatedUnread && !(generatedView && update != null)) (if (storyRead) "דיווח חדש" else "חדש") else null
                 newReports.isNotEmpty() -> if (storyRead) "דיווח חדש" else "חדש"
                 else -> null
             }
             Box(Modifier.padding(horizontal = 16.dp)) {
                 if (summary != null) {
                     GeneratedHeader(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary,
-                        badge = badge, onVersions = onVersions, details = details, flip = false, short = true)
+                        badge = badge, onVersions = onVersions, details = details, flip = false, short = true, updated = generatedView && update != null)
                 } else {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
