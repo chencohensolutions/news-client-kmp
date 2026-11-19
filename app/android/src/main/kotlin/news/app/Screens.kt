@@ -909,7 +909,7 @@ private fun StoryItem(
             Box(Modifier.padding(horizontal = 16.dp)) {
                 if (summary != null) {
                     GeneratedHeader(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary,
-                        badge = badge, onVersions = onVersions, details = details)
+                        badge = badge, onVersions = onVersions, details = details, flip = false, short = true)
                 } else {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),

@@ -198,6 +198,10 @@ internal fun GeneratedHeader(
     badge: String? = null,
     onVersions: (() -> Unit)? = null,
     details: @Composable () -> Unit = {},
+    /** The ⇄ chip to the other view at its end. */
+    flip: Boolean = true,
+    /** "✦ N אתרים" rather than "✦ כתבה מ־N אתרים": the card's line of details, kept short. */
+    short: Boolean = false,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -212,15 +216,17 @@ internal fun GeneratedHeader(
             if (!original) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Filled.AutoAwesome, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text(if (sites == 1) "כתבה מאתר אחד" else "כתבה מ־$sites אתרים", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(if (short) (if (sites == 1) "אתר אחד" else "$sites אתרים") else if (sites == 1) "כתבה מאתר אחד" else "כתבה מ־$sites אתרים",
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 }
-                if (summary.contradictions.isNotEmpty()) DisagreeChip(onArticle)
+                if (summary.contradictions.isNotEmpty()) DisagreeChip(onArticle, short)
                 if (onVersions != null && summary.versions > 1) VersionChip(summary, onVersions)
             } else {
                 Text("כותרת המקור · ${names[lead.sourceId] ?: lead.sourceId}", style = MaterialTheme.typography.labelMedium, color = muted)
             }
         }
-        FlipChip(if (original) "לכתבה המסוכמת" else "למקור", onFlip)
+        // ⇄ only where the card asks for it: the feed's cards switch with the bottom bar's filter.
+        if (flip) FlipChip(if (original) "לכתבה המסוכמת" else "למקור", onFlip)
     }
 }
 
@@ -452,7 +458,7 @@ private fun StoryMedia(media: List<StoryMediaItem>, names: Map<String, String>, 
 
 /** "⚖ האתרים חלוקים": the sites state different facts about the story; [onClick] shows where. */
 @Composable
-internal fun DisagreeChip(onClick: () -> Unit) {
+internal fun DisagreeChip(onClick: () -> Unit, short: Boolean = false) {
     Row(
         Modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.tertiaryContainer).clickable(onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -460,7 +466,7 @@ internal fun DisagreeChip(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Icon(Icons.Filled.Balance, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
-        Text("האתרים חלוקים", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+        if (!short) Text("האתרים חלוקים", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onTertiaryContainer)
     }
 }
 
