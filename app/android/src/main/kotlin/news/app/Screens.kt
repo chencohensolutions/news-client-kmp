@@ -803,6 +803,10 @@ private fun FilterLabels(
     }
 }
 
+/** Every category among a story's [reports], the lead's first, without the ones in [unrelated]. */
+internal fun storyCategories(reports: List<ArticleSummary>, unrelated: Collection<String>): List<String> =
+    reports.filter { it.url !in unrelated }.mapNotNull { it.category }.distinct()
+
 /** A category's name in the header's filters: [OTHER_CATEGORY] is "אחר". */
 private fun filterCategoryName(id: String): String = if (id == OTHER_CATEGORY) categoryName(null) else categoryName(id)
 
@@ -887,14 +891,10 @@ private fun StoryItem(
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             Spacer(Modifier.height(6.dp))
-            // The story's category: its lead's own, the one the filters went by. Not another report's: a story led by
-            // a headline with none ("אחר") would read as that report's category.
-            // A generated story: every category among its reports (about this event), when they differ.
+            // The story's categories: every one among its reports (the lead's first), leaving out reports the story
+            // set aside as about something else.
             val details = @Composable {
-                val categories = if (generatedView) {
-                    reports.filter { it.url !in summary?.unrelated.orEmpty() }.mapNotNull { it.category }.distinct().takeIf { it.size > 1 }
-                } else null
-                if (showCategory) (categories ?: listOfNotNull(lead.category)).forEach { CategoryLabel(categoryName(it)) }
+                if (showCategory) storyCategories(reports, summary?.unrelated.orEmpty()).forEach { CategoryLabel(categoryName(it)) }
                 if (lead.video) VideoLabel()
                 ago(lead.publishedAt)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = muted) }
                 // Brought by the topic search: which topic, how close (the best of its reports).
