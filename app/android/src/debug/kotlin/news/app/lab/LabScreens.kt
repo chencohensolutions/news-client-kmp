@@ -1,6 +1,11 @@
 package news.app.lab
 
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,6 +114,15 @@ internal val labScreens: List<LabScreen> = listOf(
             val s = SummariesSample.stories[1]
             SummaryArticleScreen(s.story, s.toStorySummary(), PreviewData.sites.associate { it.id to it.name }, onFootnote = {}, onBack = {})
         },
+    )),
+    LabScreen("whats-new", "Generated articles: what's new (מה חדש)", listOf(
+        current { WhatsNewPageLab(sinceMinutes = 60) },
+        LabOption("first", "First visit", "Never opened: no block") { WhatsNewPageLab(sinceMinutes = null) },
+        LabOption("quiet", "Nothing new", "Opened 5 minutes ago: one quiet line") { WhatsNewPageLab(sinceMinutes = 5) },
+        LabOption("no-kinds", "Server before kinds", "Updates without kinds: each version's first sentence a line, the rest behind ועוד") {
+            WhatsNewPageLab(sinceMinutes = 60, kinds = false)
+        },
+        LabOption("cards", "Feed cards", "Updated since the last opening: עודכן and a חדש: line; then the same without kinds") { WhatsNewCardsLab() },
     )),
     LabScreen("settings", "Settings", listOf(
         current { SettingsLab() },
@@ -246,3 +260,34 @@ private fun SettingsLab(
 
 /** The made-up sites of the samples ([PreviewData.sites]). */
 internal fun labSources(): List<Site> = PreviewData.sites
+
+/** The story page of [WhatsNewSample], last opened [sinceMinutes] ago (null: never). */
+@Composable
+private fun WhatsNewPageLab(sinceMinutes: Int?, kinds: Boolean = true) {
+    val summary = WhatsNewSample.summary(kinds)
+    news.app.SummaryArticleScreen(
+        WhatsNewSample.story, summary, WhatsNewSample.names, onFootnote = {}, onBack = {}, onVersions = {},
+        whatsNew = news.app.whatsNew(summary, sinceMinutes?.let(WhatsNewSample::ago)),
+    )
+}
+
+/** [WhatsNewSample]'s card as the feed draws it, opened an hour ago, with kinds and without. */
+@Composable
+private fun WhatsNewCardsLab() {
+    news.app.AppLayout {
+        androidx.compose.material3.Surface(androidx.compose.ui.Modifier.fillMaxSize()) {
+            androidx.compose.foundation.layout.Column(
+                androidx.compose.ui.Modifier.safeDrawingPadding().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(vertical = 16.dp),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(24.dp),
+            ) {
+                listOf(true, false).forEach { kinds ->
+                    val summary = WhatsNewSample.summary(kinds)
+                    news.app.GeneratedPart(
+                        summary, 5, WhatsNewSample.story.lead, WhatsNewSample.names, original = false, onFlip = {}, onArticle = {},
+                        maxSentences = 2, onVersions = {}, update = news.app.cardUpdate(summary, WhatsNewSample.ago(60)),
+                    )
+                }
+            }
+        }
+    }
+}

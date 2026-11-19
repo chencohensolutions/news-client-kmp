@@ -36,9 +36,6 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.History
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,7 +64,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -75,15 +71,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.withLink
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import news.app.server.Footnote
 import news.app.server.Sentence
-import news.app.server.ChangeKind
-import news.app.server.SentenceChange
-import news.app.server.StoryChanges
 import news.app.server.StorySummary
 import news.app.stories.Story
 import java.util.Date
@@ -136,16 +128,19 @@ internal fun GeneratedPart(
     title: Boolean = true,
     /** Its "✦ כתבה מ־N אתרים" line; false when the card shows it itself ([GeneratedHeader]), with its details. */
     header: Boolean = true,
+    /** What's new since the last opening: a "חדש:" line under the title (the card shows it itself, under its own title). */
+    update: CardUpdate? = null,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (header) GeneratedHeader(summary, sites, lead, names, original, onFlip, onArticle, badge, onVersions)
+        if (header) GeneratedHeader(summary, sites, lead, names, original, onFlip, onArticle, badge, onVersions, updated = update != null)
         if (original) {
             if (title) Text(lead.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             (lead.subtitle ?: lead.summary)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = muted) }
         } else {
             // The whole article as clean text, then what the sites disagree on, then its sources once each.
             if (title) Text(summary.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onArticle))
+            update?.line?.takeIf { title }?.let { UpdateLine(it, update.others, names, onArticle) }
             // Its threads, above the text.
             if (threads && summary.threads.isNotEmpty()) ThreadLines(summary.threads, { onThread(it, summary.id) }, Modifier.padding(vertical = 2.dp))
             val cut = maxSentences > 0 && summary.sentences.size > maxSentences
@@ -202,6 +197,8 @@ internal fun GeneratedHeader(
     flip: Boolean = true,
     /** "✦ N אתרים" rather than "✦ כתבה מ־N אתרים": the card's line of details, kept short. */
     short: Boolean = false,
+    /** "עודכן" first: the story has news since it was last opened ([UpdatedBadge]). */
+    updated: Boolean = false,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -211,6 +208,7 @@ internal fun GeneratedHeader(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
+            if (updated) UpdatedBadge()
             badge?.let { NewBadge(it) }
             details()
             if (!original) {
@@ -257,11 +255,11 @@ fun SummaryArticleScreen(
     articles: Map<String, news.core.model.Article> = emptyMap(),
     /** The story's versions ([StoryVersionsScreen]); null: no link to them. */
     onVersions: (() -> Unit)? = null,
+    /** What's new since the reader last opened it ([whatsNew]): a block over the text; null on a first visit. */
+    whatsNew: WhatsNew? = null,
     /** The end of the page: its threads and their earlier and later stories ([ThreadRelated]). Last: a trailing lambda. */
     related: @Composable () -> Unit = {},
 ) {
-    // What this version changed from the one before, marked in the text; the note's switch takes the marker off.
-    var marked by rememberSaveable(summary.id, summary.writtenAt.toEpochMilliseconds()) { mutableStateOf(true) }
     val numbered = numbering(summary.sentences + summary.contradictions)
     val context = LocalContext.current
     val sites = citedSites(story, summary)
@@ -319,13 +317,11 @@ fun SummaryArticleScreen(
                     if (!summary.current) {
                         Text("כתבות חדשות הצטרפו לסיפור: גרסה מעודכנת תיכתב בקרוב.", style = MaterialTheme.typography.labelMedium, color = muted)
                     }
-                    summary.changes?.let { ChangesNote(it, summary.title, marked) { marked = !marked } }
+                    // What came since the last visit, over the text; the text itself unmarked.
+                    whatsNew?.let { WhatsNewBlock(it, names, onFootnote) }
                     // The sites' labels in the text after each sentence, as the feed's inline labels.
                     val body = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 32.sp)
-                    summary.sentences.forEachIndexed { i, sentence ->
-                        Inline(listOf(sentence), names, onFootnote, body, changes = if (marked) listOf(summary.changes?.sentences?.getOrNull(i)) else emptyList())
-                    }
-                    if (marked) summary.changes?.let { Removed(it.removed) }
+                    summary.sentences.forEach { sentence -> Inline(listOf(sentence), names, onFootnote, body) }
                     if (summary.contradictions.isNotEmpty()) {
                         Disagreements(summary.contradictions, names, onFootnote) { Inline(listOf(it), names, onFootnote, MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp)) }
                     }
@@ -626,10 +622,7 @@ private fun Inline(
     style: TextStyle,
     modifier: Modifier = Modifier,
     lines: Boolean = false,
-    /** What each sentence (by index) changed from the version before: its added words marked ([changeMarker]). */
-    changes: List<SentenceChange?> = emptyList(),
 ) {
-    val marker = changeMarker()
     val inline = HashMap<String, InlineTextContent>()
     // Each label's room in the line is its measured width (the pill's text, its padding, the film icon), so the labels
     // sit close together, a hair space apart.
@@ -639,14 +632,7 @@ private fun Inline(
     val text = buildAnnotatedString {
         sentences.forEachIndexed { i, sentence ->
             if (i > 0) append(if (lines) "\n" else " ")
-            val change = changes.getOrNull(i)
-            if (change == null || change.kind == ChangeKind.SAME || change.parts.joinToString("") { it.text } != sentence.text) {
-                append(sentence.text)
-            } else {
-                change.parts.forEach { part ->
-                    if (part.added) withStyle(SpanStyle(background = marker)) { append(part.text) } else append(part.text)
-                }
-            }
+            append(sentence.text)
             newestPerSite(sentence.footnotes).forEachIndexed { j, note ->
                 val name = label(note, names)
                 val id = "${note.url}#$i"
@@ -708,11 +694,6 @@ private fun newerVersion(a: StorySummary, sa: Story, b: StorySummary, sb: Story)
     else -> sa.reports.size > sb.reports.size
 }
 
-/** The marker behind the words a version added: a yellow highlighter, light enough for the text to read in both themes. */
-@Composable
-internal fun changeMarker(): Color =
-    if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) Color(0x66C9A400) else Color(0xFFFFF0A8)
-
 /**
  * "גרסה N" ("גרסה N מתוך M" for an earlier one), on a story's card and page when it was written more than once; a tap
  * opens its versions ([StoryVersionsScreen]).
@@ -736,59 +717,8 @@ internal fun VersionChip(summary: StorySummary, onClick: () -> Unit) {
 }
 
 /**
- * What a version changed from the one before, at the top of its text: when the one before was written, its title when
- * it changed, and the marker's key; with [onToggle], a switch for the marker.
- */
-@Composable
-private fun ChangesNote(changes: StoryChanges, title: String, marked: Boolean, onToggle: (() -> Unit)?) {
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val added = changes.sentences.count { it.kind != ChangeKind.SAME }
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                buildAnnotatedString {
-                    append("מאז הגרסה הקודמת (${timeOf(changes.since)}): ")
-                    when {
-                        added == 0 && changes.removed.isEmpty() -> append("אותן עובדות, בניסוח חדש")
-                        else -> {
-                            withStyle(SpanStyle(background = changeMarker())) { append(if (added == 1) "משפט אחד חדש או מעודכן" else "$added משפטים חדשים או מעודכנים") }
-                            if (changes.removed.isNotEmpty()) append(" · ${changes.removed.size} הוסרו")
-                        }
-                    }
-                },
-                style = MaterialTheme.typography.labelMedium,
-                color = muted,
-                modifier = Modifier.weight(1f),
-            )
-            if (onToggle != null && added > 0) {
-                Text(
-                    if (marked) "בלי הדגשה" else "הדגשת השינויים",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(onClick = onToggle).padding(vertical = 2.dp),
-                )
-            }
-        }
-        if (changes.title != title) Text("הכותרת הקודמת: ${changes.title}", style = MaterialTheme.typography.labelSmall, color = muted)
-    }
-}
-
-/** The sentences the version before had and this one doesn't: struck through, quiet. */
-@Composable
-private fun Removed(sentences: List<Sentence>) {
-    if (sentences.isEmpty()) return
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("הוסר מהגרסה הקודמת", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = muted)
-        sentences.forEach {
-            Text(it.text, style = MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.LineThrough), color = muted)
-        }
-    }
-}
-
-/**
  * A story's versions, newest first ([versions]: null while they load, empty when the server has none): each with when
- * it was written, its title and text, the words it added since the one before marked, and what it dropped.
+ * it was written, its title and its text.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -830,10 +760,8 @@ fun StoryVersionsScreen(
                                 color = MaterialTheme.colorScheme.primary,
                             )
                             Text(v.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            v.changes?.let { ChangesNote(it, v.title, marked = true, onToggle = null) }
                             val body = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp)
-                            v.sentences.forEachIndexed { i, sentence -> Inline(listOf(sentence), names, onFootnote, body, changes = listOf(v.changes?.sentences?.getOrNull(i))) }
-                            v.changes?.let { Removed(it.removed) }
+                            v.sentences.forEach { sentence -> Inline(listOf(sentence), names, onFootnote, body) }
                         }
                         HorizontalDivider()
                     }

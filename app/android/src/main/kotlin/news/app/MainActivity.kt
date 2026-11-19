@@ -161,6 +161,7 @@ fun NewsApp(
     val serverStats by vm.serverStats.collectAsStateWithLifecycle()
     val statsLoading by vm.statsLoading.collectAsStateWithLifecycle()
     val summaryStory by vm.summaryStory.collectAsStateWithLifecycle()
+    val summarySince by vm.summarySince.collectAsStateWithLifecycle()
     val threadLayers by vm.threadLayers.collectAsStateWithLifecycle()
     val threadPages by vm.threadPages.collectAsStateWithLifecycle()
     val storyVersions by vm.storyVersions.collectAsStateWithLifecycle()
@@ -299,7 +300,8 @@ fun NewsApp(
                     val summary = story?.reports?.firstNotNullOfOrNull { headlines.summaries[it.url] }
                     // A generated article's page, its threads and their stories at the end.
                     val articlePage = @Composable { s: news.app.stories.Story, sum: news.app.server.StorySummary, onBack: () -> Unit ->
-                        SummaryArticleScreen(s, sum, names, onFootnote = vm::openFootnote, onBack = onBack, articles = storyArticles, onVersions = { vm.openVersions(sum) }) {
+                        SummaryArticleScreen(s, sum, names, onFootnote = vm::openFootnote, onBack = onBack, articles = storyArticles, onVersions = { vm.openVersions(sum) },
+                            whatsNew = if (s == summaryStory) whatsNew(sum, summarySince) else null) {
                             ThreadRelated(
                                 sum.id, sum.threads, threadPages,
                                 onThread = { vm.openThread(it, sum.id) },
