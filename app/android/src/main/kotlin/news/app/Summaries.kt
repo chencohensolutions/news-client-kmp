@@ -128,7 +128,7 @@ internal fun GeneratedPart(
     maxSentences: Int = 0,
     /** The story's versions ([StoryVersionsScreen]): with it, a story written more than once shows "גרסה N". */
     onVersions: (() -> Unit)? = null,
-    /** Its threads' lines at its end; false when the card shows them itself (under its picture). */
+    /** Its threads' lines, above the text; false for none. */
     threads: Boolean = true,
     /** With [SourceLabels.BELOW], the row of its sites under the text; false when the card shows them itself (on top). */
     sourcesRow: Boolean = true,
@@ -156,6 +156,8 @@ internal fun GeneratedPart(
         } else {
             // The whole article as clean text, then what the sites disagree on, then its sources once each.
             if (title) Text(summary.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onArticle))
+            // Its threads, above the text.
+            if (threads && summary.threads.isNotEmpty()) ThreadLines(summary.threads, { onThread(it, summary.id) }, Modifier.padding(vertical = 2.dp))
             val cut = maxSentences > 0 && summary.sentences.size > maxSentences
             val sentences = if (cut) summary.sentences.take(maxSentences) else summary.sentences
             val contradictions = if (cut) emptyList() else summary.contradictions
@@ -185,7 +187,6 @@ internal fun GeneratedPart(
                     modifier = Modifier.clickable(onClick = onArticle).padding(vertical = 2.dp),
                 )
             }
-            if (threads) ThreadLines(summary.threads, { onThread(it, summary.id) }, Modifier.padding(top = 6.dp))
         }
     }
 }

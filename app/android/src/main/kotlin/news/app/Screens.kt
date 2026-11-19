@@ -940,7 +940,7 @@ private fun StoryItem(
                 }
                 Spacer(Modifier.height(4.dp))
             }
-            // The picture, and right under it the story's threads.
+            // The picture.
             val picture = @Composable {
                 lead.imageUrl?.let { url ->
                     Spacer(Modifier.height(10.dp))
@@ -954,9 +954,6 @@ private fun StoryItem(
                         // Edge to edge: no margin, so no rounded corners either. Moves into the article when it opens.
                         modifier = Modifier.sharedPicture(lead.url).fillMaxWidth().aspectRatio(pictureRatios[url] ?: (16f / 9f)),
                     )
-                }
-                summary?.takeIf { generatedView && it.threads.isNotEmpty() }?.let { written ->
-                    ThreadLines(written.threads, { onThread(it, written.id) }, Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp))
                 }
             }
             // The headline (the written one, or the lead's), its sites, its category and time, the picture, then the
@@ -975,7 +972,6 @@ private fun StoryItem(
                     maxSentences = feedSentences,
                     badge = if (generatedView && generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null,
                     onVersions = onVersions,
-                    threads = false,
                     sourcesRow = false,
                     title = false)
             }
