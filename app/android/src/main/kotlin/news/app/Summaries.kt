@@ -132,6 +132,8 @@ internal fun GeneratedPart(
     threads: Boolean = true,
     /** With [SourceLabels.BELOW], the row of its sites under the text; false when the card shows them itself (on top). */
     sourcesRow: Boolean = true,
+    /** Between the written title and the text (the card's sites, category and time); null for nothing. */
+    underTitle: (@Composable () -> Unit)? = null,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -150,10 +152,12 @@ internal fun GeneratedPart(
         }
         if (original) {
             Text(lead.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            underTitle?.invoke()
             (lead.subtitle ?: lead.summary)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = muted) }
         } else {
             // The whole article as clean text, then what the sites disagree on, then its sources once each.
             Text(summary.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onArticle))
+            underTitle?.invoke()
             val cut = maxSentences > 0 && summary.sentences.size > maxSentences
             val sentences = if (cut) summary.sentences.take(maxSentences) else summary.sentences
             val contradictions = if (cut) emptyList() else summary.contradictions
