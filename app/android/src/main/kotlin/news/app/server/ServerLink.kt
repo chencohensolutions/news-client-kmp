@@ -22,7 +22,7 @@ data class EnrollmentLink(
 
 /** [text] as an [EnrollmentLink]; null when it isn't one (another QR code, a web page). */
 fun parseEnrollmentLink(text: String): EnrollmentLink? {
-    val uri = runCatching { URI(text.trim()) }.getOrNull() ?: return null
+    val uri = runCatching { URI(withoutInvisibles(text).trim()) }.getOrNull() ?: return null
     if (!uri.scheme.equals("news", ignoreCase = true) || !uri.host.equals("enroll", ignoreCase = true)) return null
     val query = uri.rawQuery.orEmpty().split('&').filter { it.isNotEmpty() }.map { part ->
         decode(part.substringBefore('=')) to decode(part.substringAfter('=', ""))
@@ -56,12 +56,19 @@ private val FINGERPRINT = Regex("[0-9a-f]{64}")
 private fun decode(s: String) = java.net.URLDecoder.decode(s, Charsets.UTF_8.name())
 
 /**
+ * [text] without the invisible characters a paste or a right-to-left keyboard adds around it: direction marks
+ * (U+200E, U+200F, U+202A..U+202E, U+2066..U+2069), zero-width spaces and joiners, a byte order mark. Typed into the
+ * Hebrew screen, `https://…` arrives wrapped in them, and a URL with one isn't a URL.
+ */
+fun withoutInvisibles(text: String): String = text.filterNot { Character.getType(it) == Character.FORMAT.toInt() }
+
+/**
  * The server's base URL for an address as typed or in a link: `192.168.50.2:8443`, `myhome.example.org`,
  * `https://myhome.example.org:56399/`. Always https; [DEFAULT_SERVER_PORT] when no port is given; no path. Null when it
  * isn't an address.
  */
 fun serverUrl(address: String): String? {
-    val trimmed = address.trim().trimEnd('/')
+    val trimmed = withoutInvisibles(address).trim().trimEnd('/')
     if (trimmed.isEmpty() || trimmed.any { it.isWhitespace() }) return null
     val withScheme = if ("://" in trimmed) trimmed else "https://$trimmed"
     val uri = runCatching { URI(withScheme) }.getOrNull() ?: return null
