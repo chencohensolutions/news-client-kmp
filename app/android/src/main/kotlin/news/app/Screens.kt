@@ -409,7 +409,7 @@ fun HeadlinesScreen(
                                         Text(
                                             when {
                                                 serverDown -> "שרת החדשות לא עונה · " + checkInLine(state.refreshedAt, feed.newCount, false)
-                                                !searching -> checkInLine(state.refreshedAt, feed.newCount, state.refreshing)
+                                                !searching -> checkInLine(state.refreshedAt, feed.newCount, state.refreshing || state.starting)
                                                 topicsWorking -> "מחפש…"
                                                 else -> "${feed.all.size} סיפורים וכותרות · ${topicsOn.joinToString(", ")}"
                                             },
@@ -472,6 +472,11 @@ fun HeadlinesScreen(
                     // The downloads and the story finding stay in sight when the header slides away: under the status bar
                     // then, which the header no longer covers.
                     Column(Modifier.fillMaxWidth().topSpace { (statusBar - headerShown()).roundToInt() }.background(MaterialTheme.colorScheme.surface)) {
+                        // Fetching: the saved feed at launch, a refresh, the server's stories. The download line says more when it shows.
+                        val fetching = state.starting || state.refreshing || (state.stories as? StoriesState.Ready)?.refreshing == true
+                        AnimatedVisibility(visible = fetching && !downloads.showing, enter = fadeIn(), exit = fadeOut()) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp), color = MaterialTheme.colorScheme.primary)
+                        }
                         AnimatedVisibility(visible = downloads.showing, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                             Column(Modifier.fillMaxWidth()) {
                                 LinearProgressIndicator(
@@ -556,7 +561,7 @@ fun HeadlinesScreen(
                             if (first >= 0) scope.launch {
                                 // The rows above the stories: a site's failure, a message.
                                 val above = (if (site != null && failure != null) 1 else 0) +
-                                    (if ((state.items.isEmpty() && !state.refreshing) || (searching && feed.all.isEmpty() && !topicsWorking)) 1 else 0)
+                                    (if ((state.items.isEmpty() && !state.refreshing && !state.starting) || (searching && feed.all.isEmpty() && !topicsWorking)) 1 else 0)
                                 val target = above + first
                                 // A long way off, a jump most of the way first, so the ride is short.
                                 val from = listState.firstVisibleItemIndex
@@ -611,7 +616,7 @@ fun HeadlinesScreen(
                     modifier = Modifier.hazeSource(glass),
                 ) {
                     if (site != null && failure != null) item(key = "failure") { FailureBanner(names[site] ?: site, failure) }
-                    if (state.items.isEmpty() && !state.refreshing) {
+                    if (state.items.isEmpty() && !state.refreshing && !state.starting) {
                         item { Message("אין כותרות עדיין. משכו למטה כדי לרענן.") }
                     } else if (searching && feed.all.isEmpty() && !topicsWorking) {
                         item(key = "no-match") {
@@ -873,65 +878,36 @@ private fun StoryItem(
         val generatedView = summary != null && !original
         // A generated story's card opens its page; another, the reader at its lead.
         Column(Modifier.fillMaxWidth().clickable { if (generatedView) onSummary() else onOpen(lead) }.padding(top = 14.dp)) {
-            // A generated story's "חדש" is on its "✦ כתבה מ־N אתרים" line ([GeneratedPart]).
-            if (!generatedView) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // On top, over the picture: the sites, then the category and the time.
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // Many sites wrap onto more lines rather than run off the edge.
                 FlowRow(
                     Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    // The sites that report it, a headline on its own included: its one site. The lead's, whose
-                    // picture and title follow, filled. Their full names: this line wraps, unlike the
-                    // narrow column of the reports below, which keeps the short ones.
-                    reports.map { it.sourceId }.distinct().forEach { id ->
-                        SitePill(id, names[id] ?: id, highlight = id == lead.sourceId)
+                    if (generatedView && summary != null) {
+                        // The sites its text cites, once each: a tap opens that site's newest article in it.
+                        storySites(summary).forEach { note ->
+                            SitePill(note.sourceId.orEmpty(), note.sourceId?.let { names[it] ?: it } ?: "מקור", onClick = { onFootnote(note) }, video = note.video)
+                        }
+                    } else {
+                        // The sites that report it, a headline on its own included: its one site. The lead's, whose
+                        // picture and title follow, filled. Their full names: this line wraps, unlike the
+                        // narrow column of the reports below, which keeps the short ones.
+                        reports.map { it.sourceId }.distinct().forEach { id ->
+                            SitePill(id, names[id] ?: id, highlight = id == lead.sourceId)
+                        }
                     }
                 }
-                if (summary != null) {
-                    if (generatedUnread) NewBadge(if (storyRead) "דיווח חדש" else "חדש")
-                } else if (newReports.isNotEmpty()) {
-                    NewBadge(if (storyRead) "דיווח חדש" else "חדש")
+                // A generated story's "חדש" is on its "✦ כתבה מ־N אתרים" line ([GeneratedPart]).
+                if (!generatedView) {
+                    if (summary != null) {
+                        if (generatedUnread) NewBadge(if (storyRead) "דיווח חדש" else "חדש")
+                    } else if (newReports.isNotEmpty()) {
+                        NewBadge(if (storyRead) "דיווח חדש" else "חדש")
+                    }
                 }
-            }
-            val picture = @Composable {
-                lead.imageUrl?.let { url ->
-                    Spacer(Modifier.height(10.dp))
-                    // The picture's box has its height before the image is drawn (its proportions, once seen, else 16:9),
-                    // so a story scrolled back into view doesn't grow and push the list.
-                    AsyncImage(
-                        model = url,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        onSuccess = { pictureRatios.record(url, it.painter.intrinsicSize) },
-                        // Edge to edge: no margin, so no rounded corners either. Moves into the article when it opens.
-                        modifier = Modifier.sharedPicture(lead.url).fillMaxWidth().aspectRatio(pictureRatios[url] ?: (16f / 9f)),
-                    )
-                }
-            }
-            if (!pictureBelow) picture()
-            Spacer(Modifier.height(10.dp))
-            if (summary != null) {
-                GeneratedPart(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary, onFootnote, sourceLabels, sentenceLines, onThread,
-                    maxSentences = feedSentences,
-                    badge = if (generatedView && generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null,
-                    onVersions = onVersions)
-            } else {
-                Text(
-                    lead.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-            }
-            (lead.subtitle ?: lead.summary)?.takeIf { summary == null }?.let {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = muted,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
             }
             Spacer(Modifier.height(6.dp))
             Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -949,7 +925,6 @@ private fun StoryItem(
                     VideoLabel()
                     Spacer(Modifier.width(6.dp))
                 }
-                // The sites are on the top line; here the time.
                 ago(lead.publishedAt)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = muted) }
                 // Brought by the topic search: which topic, how close (the best of its reports).
                 match?.let {
@@ -960,6 +935,51 @@ private fun StoryItem(
                     Spacer(Modifier.width(8.dp))
                     ReadMark(animate = lead.url in justRead)
                 }
+            }
+            // The picture, and right under it the story's threads.
+            val picture = @Composable {
+                lead.imageUrl?.let { url ->
+                    Spacer(Modifier.height(10.dp))
+                    // The picture's box has its height before the image is drawn (its proportions, once seen, else 16:9),
+                    // so a story scrolled back into view doesn't grow and push the list.
+                    AsyncImage(
+                        model = url,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        onSuccess = { pictureRatios.record(url, it.painter.intrinsicSize) },
+                        // Edge to edge: no margin, so no rounded corners either. Moves into the article when it opens.
+                        modifier = Modifier.sharedPicture(lead.url).fillMaxWidth().aspectRatio(pictureRatios[url] ?: (16f / 9f)),
+                    )
+                }
+                summary?.takeIf { generatedView && it.threads.isNotEmpty() }?.let { written ->
+                    ThreadLines(written.threads, { onThread(it, written.id) }, Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp))
+                }
+            }
+            if (!pictureBelow) picture()
+            Spacer(Modifier.height(10.dp))
+            if (summary != null) {
+                GeneratedPart(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary, onFootnote, sourceLabels, sentenceLines, onThread,
+                    maxSentences = feedSentences,
+                    badge = if (generatedView && generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null,
+                    onVersions = onVersions,
+                    threads = false,
+                    sourcesRow = false)
+            } else {
+                Text(
+                    lead.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+            (lead.subtitle ?: lead.summary)?.takeIf { summary == null }?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = muted,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
             }
             if (pictureBelow) picture()
             Spacer(Modifier.height(6.dp))

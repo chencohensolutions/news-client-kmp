@@ -128,6 +128,10 @@ internal fun GeneratedPart(
     maxSentences: Int = 0,
     /** The story's versions ([StoryVersionsScreen]): with it, a story written more than once shows "גרסה N". */
     onVersions: (() -> Unit)? = null,
+    /** Its threads' lines at its end; false when the card shows them itself (under its picture). */
+    threads: Boolean = true,
+    /** With [SourceLabels.BELOW], the row of its sites under the text; false when the card shows them itself (on top). */
+    sourcesRow: Boolean = true,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -159,10 +163,7 @@ internal fun GeneratedPart(
                     val gap = if (sentenceLines) "\n" else " "
                     Text(sentences.joinToString(gap) { it.text }, style = body)
                     if (contradictions.isNotEmpty()) Disagreements(contradictions) { Text(it.text, style = body) }
-                    // One label a site: its first article, with the film icon when any of its articles has video.
-                    val bySite = numbering(summary.sentences + summary.contradictions).groupBy { it.sourceId ?: it.url }.values
-                        .map { notes -> notes.first().copy(video = notes.any { it.video }) }
-                    SourcesRow(bySite, names, onFootnote)
+                    if (sourcesRow) SourcesRow(storySites(summary), names, onFootnote)
                 }
                 SourceLabels.PER_SENTENCE -> {
                     sentences.forEach { Fact(it, names, onFootnote) }
@@ -182,7 +183,7 @@ internal fun GeneratedPart(
                     modifier = Modifier.clickable(onClick = onArticle).padding(vertical = 2.dp),
                 )
             }
-            ThreadLines(summary.threads, { onThread(it, summary.id) }, Modifier.padding(top = 6.dp))
+            if (threads) ThreadLines(summary.threads, { onThread(it, summary.id) }, Modifier.padding(top = 6.dp))
         }
     }
 }
@@ -450,7 +451,7 @@ private fun Fact(sentence: Sentence, names: Map<String, String>, onFootnote: (Fo
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text((if (bullet) "• " else "") + sentence.text, style = MaterialTheme.typography.bodyLarge)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            sentence.footnotes.forEach { note -> FootnotePill(note, names, onFootnote) }
+            newestPerSite(sentence.footnotes).forEach { note -> FootnotePill(note, names, onFootnote) }
         }
     }
 }
@@ -480,6 +481,18 @@ private fun SourcesRow(notes: List<Footnote>, names: Map<String, String>, onFoot
 private fun FootnotePill(note: Footnote, names: Map<String, String>, onFootnote: (Footnote) -> Unit) {
     SitePill(note.sourceId.orEmpty(), label(note, names), onClick = { onFootnote(note) }, video = note.video)
 }
+
+/**
+ * One label a site: of [notes] (one sentence's, or the whole article's), each site's newest article, by when it was
+ * published (the first cited when none says), so a tap opens the latest that site wrote about it.
+ */
+internal fun newestPerSite(notes: List<Footnote>): List<Footnote> =
+    notes.withIndex().groupBy { it.value.sourceId ?: it.value.url }.values.map { site ->
+        site.maxWith(compareBy<IndexedValue<Footnote>, kotlin.time.Instant?>(nullsFirst()) { it.value.publishedAt }.thenByDescending { it.index }).value
+    }
+
+/** The article's sites, once each, in order of first citation: each its newest cited article ([newestPerSite]). */
+internal fun storySites(summary: StorySummary): List<Footnote> = newestPerSite(numbering(summary.sentences + summary.contradictions))
 
 /** Each source's footnote number, by first use. */
 private fun numbering(sentences: List<Sentence>): List<Footnote> = sentences.flatMap { it.footnotes }.distinctBy { it.url }
@@ -562,7 +575,7 @@ private fun Inline(
                     if (part.added) withStyle(SpanStyle(background = marker)) { append(part.text) } else append(part.text)
                 }
             }
-            sentence.footnotes.forEachIndexed { j, note ->
+            newestPerSite(sentence.footnotes).forEachIndexed { j, note ->
                 val name = label(note, names)
                 val id = "${note.url}#$i"
                 append(if (j == 0) "\u2009" else "\u200A")
