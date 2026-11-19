@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import news.app.server.EnrollmentLink
+import news.app.server.FollowedStory
 import news.app.server.Footnote
 import news.app.server.StorySummary
 import news.app.server.ServerGrouping
@@ -549,6 +550,12 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val readHistory = ReadHistory(File(app.filesDir, ReadHistory.FILE))
 
+    private val savedArticles = SavedArticles(File(app.filesDir, SavedArticles.FILE))
+    private val _saved = MutableStateFlow<List<SavedArticle>>(emptyList())
+
+    /** The saved articles, latest saved first ([SavedArticles]). */
+    val saved: StateFlow<List<SavedArticle>> = _saved
+
     /** The feed as it was when the owner last left the app, for what counts as new. */
     /** The headlines the owner has viewed: their row went up off the screen ([scrolledPast]). */
     private val viewedHistory = ReadHistory(File(app.filesDir, VIEWED_FILE), limit = VIEWED_LIMIT)
@@ -700,6 +707,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     init {
+        viewModelScope.launch(readDispatcher) { _saved.value = savedArticles.all() }
         // Topics saved on: the feed waits for their matches (an empty list meanwhile, not the whole feed).
         applyTopics()
         // New stories (a refresh, the saved feed) bring other headlines: match them.
@@ -801,6 +809,7 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
             if (newsApp.server.inUse) {
                 newsApp.server.sources()?.let(::showServerSources)
                 syncRead()
+                launch { refreshFollowing() }
             }
             val result = repository.latest(skip = _settings.value.hiddenSources)
             val before = _headlines.value
@@ -1745,6 +1754,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
             if (state is ArticleState.Loaded) {
                 listed = listed.map { if (it.url == url) it.filledFrom(state.article) else it }
                 _headlines.update { s -> s.copy(items = s.items.map { if (it.url == url) it.filledFrom(state.article) else it }) }
+                if (_saved.value.any { it.summary.url == url }) {
+                    viewModelScope.launch(readDispatcher) { _saved.value = savedArticles.update(summary.filledFrom(state.article)) }
+                }
             }
             articleJobs.remove(url)
         }
@@ -1843,6 +1855,107 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         _returnTo.value = null
     }
 
+    /** Saves [summary] to read later, or takes it out of the saved ones if it is there. */
+    fun toggleSaved(summary: ArticleSummary) {
+        val loaded = (_articles.value[summary.url] as? ArticleState.Loaded)?.article
+        val fuller = loaded?.let { summary.filledFrom(it) } ?: summary
+        viewModelScope.launch(readDispatcher) { _saved.value = savedArticles.toggle(fuller, Clock.System.now()) }
+    }
+
+    fun removeSaved(url: String) {
+        viewModelScope.launch(readDispatcher) { _saved.value = savedArticles.remove(url) }
+    }
+
+    /** The Saved screen, over the feed, at its saved articles, or at the stories followed. */
+    fun openSaved(following: Boolean = false) {
+        _savedTab.value = if (following) 1 else 0
+        _followShownSince.value = _followSeenAt.value
+        _threadLayers.update { it + ThreadLayer.Saved }
+        viewModelScope.launch { refreshFollowing() }
+    }
+
+    private val _savedTab = MutableStateFlow(0)
+
+    /** The Saved screen's tab: 0 the saved articles, 1 the stories followed. */
+    val savedTab: StateFlow<Int> = _savedTab
+
+    fun showSavedTab(tab: Int) {
+        _savedTab.value = tab
+    }
+
+    private val _following = MutableStateFlow<List<FollowedStory>?>(null)
+
+    /** The stories followed, with their updates; null before the server first answered. */
+    val following: StateFlow<List<FollowedStory>?> = _following
+
+    private val followSeenFile = File(app.filesDir, FOLLOW_SEEN_FILE)
+    private val _followSeenAt = MutableStateFlow(
+        runCatching { Instant.fromEpochMilliseconds(followSeenFile.readText().trim().toLong()) }.getOrDefault(Instant.DISTANT_PAST),
+    )
+
+    /** When the Saved screen opened: its updates after that time are the ones marked new. */
+    private val _followShownSince = MutableStateFlow(_followSeenAt.value)
+    val followShownSince: StateFlow<Instant> = _followShownSince
+
+    /** How many updates on the stories followed came since the owner last looked: the header's badge. */
+    val followUnseen: StateFlow<Int> = combine(_following, _followSeenAt) { f, seen -> unseenUpdates(f.orEmpty(), seen) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    /** The stories followed tab was shown: its updates are seen. */
+    fun sawFollowing() {
+        val latest = _following.value.orEmpty().flatMap { it.updates }.maxOfOrNull { it.at } ?: return
+        if (latest <= _followSeenAt.value) return
+        _followSeenAt.value = latest
+        viewModelScope.launch(readDispatcher) { runCatching { followSeenFile.writeText(latest.toEpochMilliseconds().toString()) } }
+    }
+
+    private suspend fun refreshFollowing() {
+        newsApp.server.following()?.let { _following.value = it }
+    }
+
+    /** Follows the generated story [id] on the server, or stops following it; the list shows it at once. */
+    fun toggleFollow(id: String, title: String) {
+        val now = _following.value.orEmpty()
+        val follow = now.none { it.id == id }
+        _following.value = if (follow) listOf(FollowedStory(id, title, Clock.System.now(), emptyList(), emptyList())) + now else now.filter { it.id != id }
+        viewModelScope.launch {
+            if (newsApp.server.followStory(id, follow) == null) _following.value = now
+            refreshFollowing()
+        }
+    }
+
+    /**
+     * Opens the story [storyId] of an update on [followed]: the feed's story when the feed has it, else the story as
+     * its thread keeps it.
+     */
+    fun openFollowedStory(followed: FollowedStory, storyId: String) {
+        val s = _headlines.value
+        val inFeed = (s.stories as? StoriesState.Ready)?.stories.orEmpty()
+            .firstOrNull { st -> st.reports.any { s.summaries[it.url]?.id == storyId } }
+        if (inFeed != null) {
+            _threadLayers.update { it + ThreadLayer.Article(inFeed) }
+            markStoryOpened(inFeed)
+            loadThreadsOf(inFeed)
+            loadStoryArticles(inFeed)
+            return
+        }
+        viewModelScope.launch {
+            for (ref in followed.threads) {
+                val thread = newsApp.server.thread(ref.id) ?: continue
+                val story = thread.stories.firstOrNull { it.id == storyId } ?: continue
+                if (openThreadStory(story, ref)) return@launch
+            }
+            followed.threads.firstOrNull()?.let { openThread(it, storyId) }
+        }
+    }
+
+    /** Opens the reader at the saved [summary], to swipe through the saved articles in the Saved screen's order. */
+    fun openSavedArticle(summary: ArticleSummary) {
+        val pages = _saved.value.map { listOf(it.summary) }
+        val page = pages.indexOfFirst { it.first().url == summary.url }
+        _reader.value = if (page < 0) ReaderState(listOf(listOf(summary)), 0, 0) else ReaderState(pages, page, 0)
+    }
+
     fun close() {
         articleJobs.values.forEach { it.cancel() }
         articleJobs.clear()
@@ -1888,6 +2001,9 @@ class NewsViewModel(app: Application) : AndroidViewModel(app) {
         /** The viewed headlines' file ([scrolledPast]), and how many of the latest it keeps at least. */
         const val VIEWED_FILE = "viewed.txt"
         const val VIEWED_LIMIT = 20_000
+
+        /** When the owner last saw the updates on the stories they follow, in Unix ms. */
+        const val FOLLOW_SEEN_FILE = "follow-seen.txt"
 
         /** How many older headlines join the feed each time it is scrolled near its end ([showMoreOlder]). */
         const val OLDER_PAGE = 100

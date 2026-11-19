@@ -37,6 +37,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -87,7 +89,7 @@ import news.core.model.ArticleSummary
  * Reading: swipe through [ReaderState.pages], the headlines in the order the list showed them (in Stories, the
  * unread ones: [unreadQueue]). The title bar names
  * the site, then the article's category and how many of the others are still unread ("פוליטיקה · עוד 7 סיפורים שלא
- * נקראו"); a thin line under it shows how far into the list this page is; share and open-in-browser are icons. A page
+ * נקראו"); a thin line under it shows how far into the list this page is; save, share and open-in-browser are icons. A page
  * that is a story has a chip per report (site · time, a check once read) to switch between its sites' articles, in a
  * bar at the bottom that slides away while scrolling down and back on scrolling up. The
  * article on screen counts as read once the swipe settles on it ([onRead]); the pages either side load in advance
@@ -104,6 +106,9 @@ fun ReaderScreen(
     onRetry: (ArticleSummary) -> Unit,
     onRead: (ArticleSummary) -> Unit,
     onBack: () -> Unit,
+    /** The saved articles' URLs: the bookmark is filled on one of them. */
+    saved: Set<String> = emptySet(),
+    onToggleSaved: (ArticleSummary) -> Unit = {},
 ) {
     val context = LocalContext.current
     val names = sources.associate { it.id to it.name }
@@ -162,6 +167,10 @@ fun ReaderScreen(
                                     }
                                 },
                                 actions = {
+                                    IconButton(onClick = { onToggleSaved(current) }) {
+                                        if (current.url in saved) Icon(Icons.Filled.Bookmark, "הסרה מהשמורים", tint = MaterialTheme.colorScheme.primary)
+                                        else Icon(Icons.Filled.BookmarkBorder, "שמירה")
+                                    }
                                     IconButton(onClick = { shareArticle(context, current) }) { Icon(Icons.Filled.Share, "שיתוף") }
                                     IconButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(current.url))) }) {
                                         Icon(Icons.AutoMirrored.Filled.OpenInNew, "פתיחה באתר")

@@ -14,6 +14,8 @@ import news.app.server.graphql.HeadlinesQuery
 import news.app.server.graphql.RenewCertificateMutation
 import news.app.server.graphql.ServerInfoQuery
 import news.app.server.graphql.ThreadQuery
+import news.app.server.graphql.FollowingQuery
+import news.app.server.graphql.FollowStoryMutation
 import news.app.server.graphql.ThreadsQuery
 import news.app.server.graphql.ThreadsMapQuery
 import news.app.server.graphql.SummarySettingsQuery
@@ -222,6 +224,27 @@ data class ThreadRef(
     val summary: String = "",
 )
 
+/**
+ * A story this user follows: its latest title, its threads, and its short [updates] since it was followed, newest
+ * first: the new facts of its later versions and the stories that joined its threads.
+ */
+data class FollowedStory(
+    val id: String,
+    val title: String,
+    val followedAt: Instant,
+    val threads: List<ThreadRef>,
+    val updates: List<FollowUpdate>,
+)
+
+/** A short update on a followed story, about it or about a story of its threads ([newStory]: one that joined them). */
+data class FollowUpdate(
+    val at: Instant,
+    val storyId: String,
+    val storyTitle: String,
+    val newStory: Boolean,
+    val sentences: List<Sentence>,
+)
+
 /** A thread's page: the story so far, its stories oldest first, and the related threads. */
 data class ServerThread(val ref: ThreadRef, val summary: String, val stories: List<ThreadStory>, val related: List<ThreadRef>)
 
@@ -342,6 +365,12 @@ interface ServerApi {
 
     /** One thread with its stories; null when there is none with [id]. */
     suspend fun thread(id: String): ServerThread? = null
+
+    /** The stories this user follows, latest followed first, with their updates. */
+    suspend fun following(): List<FollowedStory> = emptyList()
+
+    /** Follows story [id], or stops ([follow] false); whether it is followed now. */
+    suspend fun followStory(id: String, follow: Boolean): Boolean = follow
 
     /** The threads, latest updated first, at most [first]. */
     suspend fun threads(first: Int): List<ThreadRef> = emptyList()
@@ -522,6 +551,17 @@ class ApolloServerApi(url: String, http: OkHttpClient) : ServerApi {
                 t.related.map { ThreadRef(it.id, "", 0, Instant.DISTANT_PAST, Instant.DISTANT_PAST) },
             )
         }
+
+    override suspend fun following(): List<FollowedStory> =
+        run { query(FollowingQuery()).execute() }.following.map { f ->
+            FollowedStory(
+                f.id, f.title, Instant.parse(f.followedAt), f.threads.map { it.serverThreadRef.toRef() },
+                f.updates.map { u -> FollowUpdate(Instant.parse(u.at), u.storyId, u.storyTitle, u.newStory, u.sentences.map { it.serverSentence.toSentence() }) },
+            )
+        }
+
+    override suspend fun followStory(id: String, follow: Boolean): Boolean =
+        run { mutation(FollowStoryMutation(id, follow)).execute() }.followStory
 
     override suspend fun thread(id: String): ServerThread? =
         run { query(ThreadQuery(id)).execute() }.thread?.let { t ->

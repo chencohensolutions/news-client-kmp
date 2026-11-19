@@ -461,3 +461,31 @@ query VideoStream($url: String!) {
     hls
   }
 }
+
+# --- Following ----------------------------------------------------------------------------------------------------
+
+# The stories this user follows, each with its short updates since: its own new facts and its threads' new stories.
+query Following {
+  following {
+    id
+    title
+    followedAt
+    threads {
+      ...ServerThreadRef
+    }
+    updates {
+      at
+      storyId
+      storyTitle
+      newStory
+      sentences {
+        ...ServerSentence
+      }
+      kinds
+    }
+  }
+}
+
+mutation FollowStory($id: ID!, $follow: Boolean!) {
+  followStory(id: $id, follow: $follow)
+}

@@ -57,6 +57,8 @@ import androidx.compose.runtime.remember
 import news.core.model.ArticleBlock
 import android.content.Intent
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.outlined.NotificationAdd
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.platform.LocalDensity
@@ -257,6 +259,9 @@ fun SummaryArticleScreen(
     articles: Map<String, news.core.model.Article> = emptyMap(),
     /** The story's versions ([StoryVersionsScreen]); null: no link to them. */
     onVersions: (() -> Unit)? = null,
+    /** Whether the owner follows the story ([FollowingList]); null: no follow button. */
+    followed: Boolean? = null,
+    onFollow: () -> Unit = {},
     /** The end of the page: its threads and their earlier and later stories ([ThreadRelated]). Last: a trailing lambda. */
     related: @Composable () -> Unit = {},
 ) {
@@ -287,6 +292,13 @@ fun SummaryArticleScreen(
                         }
                     },
                     actions = {
+                        followed?.let { on ->
+                            androidx.compose.material3.TextButton(onClick = onFollow) {
+                                Icon(if (on) Icons.Filled.NotificationsActive else Icons.Outlined.NotificationAdd, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (on) "במעקב" else "מעקב")
+                            }
+                        }
                         IconButton(onClick = {
                             val text = summary.title + "\n\n" + summary.sentences.joinToString(" ") { it.text }
                             context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))

@@ -169,6 +169,11 @@ fun NewsApp(
     val threadsRefreshing by vm.threadsRefreshing.collectAsStateWithLifecycle()
     val threadsMap by vm.threadsMap.collectAsStateWithLifecycle()
     val threadMapView by vm.threadMapView.collectAsStateWithLifecycle()
+    val savedArticles by vm.saved.collectAsStateWithLifecycle()
+    val savedTab by vm.savedTab.collectAsStateWithLifecycle()
+    val following by vm.following.collectAsStateWithLifecycle()
+    val followUnseen by vm.followUnseen.collectAsStateWithLifecycle()
+    val followShownSince by vm.followShownSince.collectAsStateWithLifecycle()
     // The server's enrollment QR code, scanned with the camera app: the server page, enrolling with it.
     LaunchedEffect(toEnroll) {
         val link = toEnroll ?: return@LaunchedEffect
@@ -299,7 +304,11 @@ fun NewsApp(
                     val summary = story?.reports?.firstNotNullOfOrNull { headlines.summaries[it.url] }
                     // A generated article's page, its threads and their stories at the end.
                     val articlePage = @Composable { s: news.app.stories.Story, sum: news.app.server.StorySummary, onBack: () -> Unit ->
-                        SummaryArticleScreen(s, sum, names, onFootnote = vm::openFootnote, onBack = onBack, articles = storyArticles, onVersions = { vm.openVersions(sum) }) {
+                        SummaryArticleScreen(
+                            s, sum, names, onFootnote = vm::openFootnote, onBack = onBack, articles = storyArticles, onVersions = { vm.openVersions(sum) },
+                            followed = sum.id.takeIf { it.isNotEmpty() }?.let { id -> following.orEmpty().any { it.id == id } },
+                            onFollow = { vm.toggleFollow(sum.id, sum.title) },
+                        ) {
                             ThreadRelated(
                                 sum.id, sum.threads, threadPages,
                                 onThread = { vm.openThread(it, sum.id) },
@@ -330,6 +339,21 @@ fun NewsApp(
                             ThreadLayer.All -> ThreadsScreen(allThreads, threadsRefreshing && allThreads != null, vm::refreshThreads, onThread = { vm.openThread(it, null) }, onBack = vm::closeThreadLayer)
                             is ThreadLayer.Article -> (layer.story.reports.firstNotNullOfOrNull { headlines.summaries[it.url] } ?: layer.summary)
                                 ?.let { articlePage(layer.story, it, vm::closeThreadLayer) }
+                            ThreadLayer.Saved -> SavedScreen(
+                                savedArticles, sites, headlines.read,
+                                onOpen = vm::openSavedArticle,
+                                onRemove = vm::removeSaved,
+                                onBack = vm::closeThreadLayer,
+                                tab = savedTab,
+                                onTab = vm::showSavedTab,
+                                following = following,
+                                followUnseen = followUnseen,
+                                followShownSince = followShownSince,
+                                onFollowedStory = vm::openFollowedStory,
+                                onThread = { vm.openThread(it, null) },
+                                onUnfollow = { vm.toggleFollow(it.id, it.title) },
+                                onSawFollowing = vm::sawFollowing,
+                            )
                             is ThreadLayer.Versions -> StoryVersionsScreen(layer.title, storyVersions[layer.id], names, onFootnote = vm::openFootnote, onBack = vm::closeThreadLayer)
                         }
                     } else if (open == null && story != null && summary != null) {
@@ -375,6 +399,8 @@ fun NewsApp(
                                 onRefreshOnlyNew = vm::refreshOnlyNew,
                                 onMap = vm::openMap,
                                 onThreads = vm::openThreads,
+                                onSaved = { vm.openSaved(following = followUnseen > 0) },
+                                followUnseen = followUnseen,
                                 onShowOriginal = vm::showOriginal,
                                 onFlip = vm::flipStory,
                                 onOnlyGenerated = vm::showOnlyGenerated,
@@ -397,6 +423,8 @@ fun NewsApp(
                                 onRetry = { vm.load(it, retry = true) },
                                 onRead = vm::markRead,
                                 onBack = vm::close,
+                                saved = remember(savedArticles) { savedArticles.mapTo(HashSet()) { it.summary.url } },
+                                onToggleSaved = vm::toggleSaved,
                             )
                         }
                     }

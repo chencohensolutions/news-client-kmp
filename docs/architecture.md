@@ -38,10 +38,16 @@ in the BitTorrent DHT by its key when they all stop answering (`news.app.server.
   prefetching pictures while scrolling and reading, notifications, and when to refresh. In `AppSettings`
   ([Settings.kt](../app/android/src/main/kotlin/news/app/Settings.kt)).
 - **Reading state**: read and viewed marks (the read marks also go to the server, to follow the user to their other
-  devices), the site and category filters, the saved topics of the topic search.
+  devices), the site and category filters, the saved topics of the topic search, the saved articles (`SavedArticles`:
+  their headlines, so the Saved screen lists them without the server; the articles come from the server, which keeps
+  them all), and when the updates on the stories followed were last seen.
 - **Caches**: articles (`FeedCache`), pictures (Coil) and played video (Media3), each within its quota, and an
   optional archive folder that keeps every article with its pictures and played videos (`ArticleArchive`).
 - **Topic search** matches a saved topic's words in the headlines on the phone (`news.app.stories.wordScores`).
+
+The stories the user follows are kept on the server, per user (`followStory`, `following`): it works out each one's
+short updates (the new facts of its later versions, and the stories that join its threads), and the Saved screen's
+במעקב tab shows them, with a badge on the header's Saved button for the ones not seen yet.
 
 Settings that belong to the server are read from it and changed on it: the sites it reads (on or off, RSS or pages,
 the wait between requests), how it groups stories (method, strictness, what it compares, the days), and how it writes
