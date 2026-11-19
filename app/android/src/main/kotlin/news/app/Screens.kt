@@ -878,8 +878,7 @@ private fun StoryItem(
         val generatedView = summary != null && !original
         // A generated story's card opens its page; another, the reader at its lead.
         Column(Modifier.fillMaxWidth().clickable { if (generatedView) onSummary() else onOpen(lead) }.padding(top = 14.dp)) {
-            // Under the headline: the sites, then the category and the time; the article after them. [pad]: the
-            // card's margin when not inside the generated part, which has its own.
+            // Under the headline: the sites, then the category and the time; the picture after them.
             val sourcesAndTime = @Composable { pad: androidx.compose.ui.unit.Dp ->
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth().padding(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -960,6 +959,15 @@ private fun StoryItem(
                     ThreadLines(written.threads, { onThread(it, written.id) }, Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp))
                 }
             }
+            // The headline (the written one, or the lead's), its sites, its category and time, the picture, then the
+            // "✦ כתבה מ־N אתרים" line and the article.
+            Text(
+                if (generatedView && summary != null) summary.title else lead.title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            sourcesAndTime(16.dp)
             if (!pictureBelow) picture()
             Spacer(Modifier.height(10.dp))
             if (summary != null) {
@@ -969,15 +977,7 @@ private fun StoryItem(
                     onVersions = onVersions,
                     threads = false,
                     sourcesRow = false,
-                    underTitle = { sourcesAndTime(0.dp) })
-            } else {
-                Text(
-                    lead.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-                sourcesAndTime(16.dp)
+                    title = false)
             }
             (lead.subtitle ?: lead.summary)?.takeIf { summary == null }?.let {
                 Spacer(Modifier.height(4.dp))
