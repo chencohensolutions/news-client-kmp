@@ -132,7 +132,18 @@ data class Footnote(
 
 /** A generated sentence and the articles it comes from (at least one). */
 @kotlinx.serialization.Serializable
-data class Sentence(val text: String, val footnotes: List<Footnote>)
+data class Sentence(
+    val text: String,
+    val footnotes: List<Footnote>,
+    /** A contradiction's fact in dispute ("מספר הפצועים"); null for other sentences and older contradictions. */
+    val topic: String? = null,
+    /** A contradiction's versions, each with its articles; empty for other sentences and older contradictions. */
+    val sides: List<ContradictionSide> = emptyList(),
+)
+
+/** One version of a contradiction's fact ("8", "פיגוע דריסה") and the articles that state it. */
+@kotlinx.serialization.Serializable
+data class ContradictionSide(val value: String, val footnotes: List<Footnote>)
 
 /**
  * A story's generated article (Gemini, on the server): facts only, each once, every sentence with its footnotes; and
@@ -576,7 +587,14 @@ class ApolloServerApi(url: String, http: OkHttpClient) : ServerApi {
         geminiAvailable = geminiAvailable,
     )
 
-    private fun ServerSentence.toSentence() = Sentence(text, footnotes.map { Footnote(it.url, it.sourceId, it.title, it.video, it.publishedAt?.let { t -> runCatching { Instant.parse(t.toString()) }.getOrNull() }) })
+    private fun ServerSentence.toSentence() = Sentence(
+        text,
+        footnotes.map { Footnote(it.url, it.sourceId, it.title, it.video, instantOf(it.publishedAt)) },
+        topic,
+        sides.map { side -> ContradictionSide(side.value, side.footnotes.map { Footnote(it.url, it.sourceId, it.title, it.video, instantOf(it.publishedAt)) }) },
+    )
+
+    private fun instantOf(time: Any?): Instant? = time?.let { t -> runCatching { Instant.parse(t.toString()) }.getOrNull() }
 
     override suspend fun sources(): List<ServerSource> =
         run { query(SourcesQuery()).execute() }.sources.map { it.serverSourceFields.toServerSource() }

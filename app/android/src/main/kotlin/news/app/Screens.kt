@@ -878,69 +878,74 @@ private fun StoryItem(
         val generatedView = summary != null && !original
         // A generated story's card opens its page; another, the reader at its lead.
         Column(Modifier.fillMaxWidth().clickable { if (generatedView) onSummary() else onOpen(lead) }.padding(top = 14.dp)) {
-            // Under the headline: the sites, then the category and the time; the picture after them.
-            val sourcesAndTime = @Composable { pad: androidx.compose.ui.unit.Dp ->
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.fillMaxWidth().padding(horizontal = pad), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Many sites wrap onto more lines rather than run off the edge.
+            // The headline (the written one, or the lead's); one line of details (category, time, "✦ כתבה מ־N
+            // אתרים", the version, ⇄); the sites; the threads; the picture; then the article.
+            Text(
+                if (generatedView && summary != null) summary.title else lead.title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            // The story's category: its lead's own, the one the filters went by. Not another report's: a story led by
+            // a headline with none ("אחר") would read as that report's category.
+            // A generated story: every category among its reports (about this event), when they differ.
+            val details = @Composable {
+                val categories = if (generatedView) {
+                    reports.filter { it.url !in summary?.unrelated.orEmpty() }.mapNotNull { it.category }.distinct().takeIf { it.size > 1 }
+                } else null
+                if (showCategory) (categories ?: listOfNotNull(lead.category)).forEach { CategoryLabel(categoryName(it)) }
+                if (lead.video) VideoLabel()
+                ago(lead.publishedAt)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = muted) }
+                // Brought by the topic search: which topic, how close (the best of its reports).
+                match?.let { TopicMatchLabel(it) }
+                if (leadRead) ReadMark(animate = lead.url in justRead)
+            }
+            val badge = when {
+                summary != null -> if (generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null
+                newReports.isNotEmpty() -> if (storyRead) "דיווח חדש" else "חדש"
+                else -> null
+            }
+            Box(Modifier.padding(horizontal = 16.dp)) {
+                if (summary != null) {
+                    GeneratedHeader(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary,
+                        badge = badge, onVersions = onVersions, details = details)
+                } else {
                     FlowRow(
-                        Modifier.weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (generatedView && summary != null) {
-                            // The sites its text cites, once each: a tap opens that site's newest article in it.
-                            storySites(summary).forEach { note ->
-                                SitePill(note.sourceId.orEmpty(), note.sourceId?.let { names[it] ?: it } ?: "מקור", onClick = { onFootnote(note) }, video = note.video)
-                            }
-                        } else {
-                            // The sites that report it, a headline on its own included: its one site. The lead's, whose
-                            // picture and title follow, filled. Their full names: this line wraps, unlike the
-                            // narrow column of the reports below, which keeps the short ones.
-                            reports.map { it.sourceId }.distinct().forEach { id ->
-                                SitePill(id, names[id] ?: id, highlight = id == lead.sourceId)
-                            }
-                        }
-                    }
-                    // A generated story's "חדש" is on its "✦ כתבה מ־N אתרים" line ([GeneratedPart]).
-                    if (!generatedView) {
-                        if (summary != null) {
-                            if (generatedUnread) NewBadge(if (storyRead) "דיווח חדש" else "חדש")
-                        } else if (newReports.isNotEmpty()) {
-                            NewBadge(if (storyRead) "דיווח חדש" else "חדש")
-                        }
+                        badge?.let { NewBadge(it) }
+                        details()
                     }
                 }
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.padding(horizontal = pad), verticalAlignment = Alignment.CenterVertically) {
-                    // The story's category: its lead's own, the one the filters went by. Not another report's: a story led by
-                    // a headline with none ("אחר") would read as that report's category.
-                    // A generated story: every category among its reports (about this event), when they differ.
-                    val categories = if (generatedView) {
-                        reports.filter { it.url !in summary?.unrelated.orEmpty() }.mapNotNull { it.category }.distinct().takeIf { it.size > 1 }
-                    } else null
-                    if (showCategory) (categories ?: listOfNotNull(lead.category)).forEach {
-                        CategoryLabel(categoryName(it))
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    if (lead.video) {
-                        VideoLabel()
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    ago(lead.publishedAt)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = muted) }
-                    // Brought by the topic search: which topic, how close (the best of its reports).
-                    match?.let {
-                        Spacer(Modifier.width(10.dp))
-                        TopicMatchLabel(it)
-                    }
-                    if (leadRead) {
-                        Spacer(Modifier.width(8.dp))
-                        ReadMark(animate = lead.url in justRead)
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
             }
-            // The picture.
+            Spacer(Modifier.height(8.dp))
+            // Many sites wrap onto more lines rather than run off the edge.
+            FlowRow(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (generatedView && summary != null) {
+                    // The sites its text cites, once each: a tap opens that site's newest article in it.
+                    storySites(summary).forEach { note ->
+                        SitePill(note.sourceId.orEmpty(), note.sourceId?.let { names[it] ?: it } ?: "מקור", onClick = { onFootnote(note) }, video = note.video)
+                    }
+                } else {
+                    // The sites that report it, a headline on its own included: its one site. The lead's, whose
+                    // picture and title follow, filled. Their full names: this line wraps, unlike the
+                    // narrow column of the reports below, which keeps the short ones.
+                    reports.map { it.sourceId }.distinct().forEach { id ->
+                        SitePill(id, names[id] ?: id, highlight = id == lead.sourceId)
+                    }
+                }
+            }
+            summary?.takeIf { generatedView && it.threads.isNotEmpty() }?.let { written ->
+                ThreadLines(written.threads, { onThread(it, written.id) }, Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp))
+            }
+            // The picture, right above the article.
             val picture = @Composable {
                 lead.imageUrl?.let { url ->
                     Spacer(Modifier.height(10.dp))
@@ -956,24 +961,16 @@ private fun StoryItem(
                     )
                 }
             }
-            // The headline (the written one, or the lead's), its sites, its category and time, the picture, then the
-            // "✦ כתבה מ־N אתרים" line and the article.
-            Text(
-                if (generatedView && summary != null) summary.title else lead.title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            sourcesAndTime(16.dp)
             if (!pictureBelow) picture()
             Spacer(Modifier.height(10.dp))
             if (summary != null) {
                 GeneratedPart(summary, citedSites(news.app.stories.Story(reports), summary).size, lead, names, original, onFlip, onSummary, onFootnote, sourceLabels, sentenceLines, onThread,
                     maxSentences = feedSentences,
-                    badge = if (generatedView && generatedUnread) (if (storyRead) "דיווח חדש" else "חדש") else null,
                     onVersions = onVersions,
+                    threads = false,
                     sourcesRow = false,
-                    title = false)
+                    title = false,
+                    header = false)
             }
             (lead.subtitle ?: lead.summary)?.takeIf { summary == null }?.let {
                 Spacer(Modifier.height(4.dp))

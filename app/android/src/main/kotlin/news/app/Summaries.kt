@@ -134,22 +134,12 @@ internal fun GeneratedPart(
     sourcesRow: Boolean = true,
     /** Its title (the written one, or the lead's); false when the card shows it itself, above its picture. */
     title: Boolean = true,
+    /** Its "✦ כתבה מ־N אתרים" line; false when the card shows it itself ([GeneratedHeader]), with its details. */
+    header: Boolean = true,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (!original) {
-                badge?.let { NewBadge(it) }
-                Icon(Icons.Filled.AutoAwesome, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                Text(if (sites == 1) "כתבה מאתר אחד" else "כתבה מ־$sites אתרים", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                if (summary.contradictions.isNotEmpty()) DisagreeChip(onArticle)
-                if (onVersions != null && summary.versions > 1) VersionChip(summary, onVersions)
-            } else {
-                Text("כותרת המקור · ${names[lead.sourceId] ?: lead.sourceId}", style = MaterialTheme.typography.labelMedium, color = muted)
-            }
-            Spacer(Modifier.weight(1f))
-            FlipChip(if (original) "לכתבה המסוכמת" else "למקור", onFlip)
-        }
+        if (header) GeneratedHeader(summary, sites, lead, names, original, onFlip, onArticle, badge, onVersions)
         if (original) {
             if (title) Text(lead.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             (lead.subtitle ?: lead.summary)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = muted) }
@@ -166,17 +156,17 @@ internal fun GeneratedPart(
                 SourceLabels.BELOW -> {
                     val gap = if (sentenceLines) "\n" else " "
                     Text(sentences.joinToString(gap) { it.text }, style = body)
-                    if (contradictions.isNotEmpty()) Disagreements(contradictions) { Text(it.text, style = body) }
+                    if (contradictions.isNotEmpty()) Disagreements(contradictions, names, onFootnote) { Text(it.text, style = body) }
                     if (sourcesRow) SourcesRow(storySites(summary), names, onFootnote)
                 }
                 SourceLabels.PER_SENTENCE -> {
                     sentences.forEach { Fact(it, names, onFootnote) }
-                    if (contradictions.isNotEmpty()) Disagreements(contradictions) { Fact(it, names, onFootnote) }
+                    if (contradictions.isNotEmpty()) Disagreements(contradictions, names, onFootnote) { Fact(it, names, onFootnote) }
                 }
                 SourceLabels.INLINE -> {
                     val inline = body.copy(lineHeight = 28.sp)
                     Inline(sentences, names, onFootnote, inline, lines = sentenceLines)
-                    if (contradictions.isNotEmpty()) Disagreements(contradictions) { Inline(listOf(it), names, onFootnote, inline) }
+                    if (contradictions.isNotEmpty()) Disagreements(contradictions, names, onFootnote) { Inline(listOf(it), names, onFootnote, inline) }
                 }
             }
             if (cut) {
@@ -188,6 +178,49 @@ internal fun GeneratedPart(
                 )
             }
         }
+    }
+}
+
+/**
+ * A generated story's line of details: [badge] ("חדש"), [details] (the card's category and time), "✦ כתבה מ־N אתרים", ⚖ when
+ * the sites disagree, "גרסה N", and at its end ⇄ to the other view. Wraps onto a second line when it runs long.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun GeneratedHeader(
+    summary: StorySummary,
+    sites: Int,
+    lead: news.core.model.ArticleSummary,
+    names: Map<String, String>,
+    original: Boolean,
+    onFlip: () -> Unit,
+    onArticle: () -> Unit,
+    badge: String? = null,
+    onVersions: (() -> Unit)? = null,
+    details: @Composable () -> Unit = {},
+) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FlowRow(
+            Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            badge?.let { NewBadge(it) }
+            details()
+            if (!original) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Filled.AutoAwesome, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(if (sites == 1) "כתבה מאתר אחד" else "כתבה מ־$sites אתרים", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                }
+                if (summary.contradictions.isNotEmpty()) DisagreeChip(onArticle)
+                if (onVersions != null && summary.versions > 1) VersionChip(summary, onVersions)
+            } else {
+                Text("כותרת המקור · ${names[lead.sourceId] ?: lead.sourceId}", style = MaterialTheme.typography.labelMedium, color = muted)
+            }
+        }
+        FlipChip(if (original) "לכתבה המסוכמת" else "למקור", onFlip)
     }
 }
 
@@ -288,7 +321,7 @@ fun SummaryArticleScreen(
                     }
                     if (marked) summary.changes?.let { Removed(it.removed) }
                     if (summary.contradictions.isNotEmpty()) {
-                        Disagreements(summary.contradictions) { Inline(listOf(it), names, onFootnote, MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp)) }
+                        Disagreements(summary.contradictions, names, onFootnote) { Inline(listOf(it), names, onFootnote, MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp)) }
                     }
                 }
                 if (media.isNotEmpty()) StoryMedia(media, names, onFootnote)
@@ -431,15 +464,45 @@ internal fun DisagreeChip(onClick: () -> Unit) {
     }
 }
 
+/**
+ * What the sites disagree on, as a list: each fact in dispute (its topic) and under it each version, its value and
+ * its sites' labels (a tap opens that site's newest article saying it). One the server sent without sides (written
+ * before it kept them) is its sentence, by [sentence].
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Disagreements(sentences: List<Sentence>, sentence: @Composable (Sentence) -> Unit) {
+private fun Disagreements(
+    sentences: List<Sentence>,
+    names: Map<String, String>,
+    onFootnote: (Footnote) -> Unit,
+    sentence: @Composable (Sentence) -> Unit,
+) {
     Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = RoundedCornerShape(12.dp)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.AutoMirrored.Filled.CompareArrows, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
                 Text("מה שונה בין האתרים", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             }
-            sentences.forEach { sentence(it) }
+            sentences.forEach { dispute ->
+                if (dispute.sides.size < 2) {
+                    sentence(dispute)
+                    return@forEach
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    dispute.topic?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
+                    dispute.sides.forEach { side ->
+                        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("•", style = MaterialTheme.typography.bodyLarge)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(side.value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    newestPerSite(side.footnotes).forEach { FootnotePill(it, names, onFootnote) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

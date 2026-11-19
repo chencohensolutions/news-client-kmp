@@ -26,7 +26,7 @@ extend type Mutation {
 type SummarySettings {
   """
   Gemini reads each article's whole body (default): without the lines that aren't the article (promotions, "more on
-  this", other news), a paywall stub, or paragraphs another site of the story has word for word, and up to 4,000
+  this", other news), a paywall stub, or paragraphs another site of the story has word for word, and up to 12,000
   characters. Off, it reads the first 600 characters. The title and subtitle are always sent.
   """
   fullArticles: Boolean!
@@ -71,7 +71,10 @@ extend type Story {
 type StorySummary {
   title: String!
   sentences: [Sentence!]!
-  "Where sites state different facts about the story, one sentence each saying which says what; usually none."
+  """
+  Where sites state things about the story that can't both be true (a value or an account), one each: its topic and
+  sides, and a sentence saying which says what, for apps that show only that; usually none.
+  """
   contradictions: [Sentence!]!
   "URLs of the story's reports Gemini found to be about a different event (grouped by mistake): not used in the article."
   unrelated: [String!]!
@@ -150,11 +153,30 @@ type TextPart {
 type StoryUpdate {
   at: Time!
   sentences: [Sentence!]!
+  """
+  What each of sentences is, in the same order: development, correction, detail, background or reaction. Empty for
+  a version written whole (the first, or a rewrite), whose sentences aren't sorted.
+  """
+  kinds: [String!]!
 }
 
 type Sentence {
   text: String!
   "The articles the sentence comes from, at least one."
+  footnotes: [Footnote!]!
+  """
+  A contradiction's fact in dispute, in a few words ("מספר הפצועים", "סיבת האירוע"); null for other sentences and
+  for a contradiction written before the server kept it. Show [sides] under it instead of [text] when it has them.
+  """
+  topic: String
+  "A contradiction's versions of the fact, each with the articles that say it (two or more); empty otherwise."
+  sides: [ContradictionSide!]!
+}
+
+"One version of a contradiction's fact and the articles that state it."
+type ContradictionSide {
+  "A few words or a number: \"8\", \"פיגוע דריסה\". Never a site's name."
+  value: String!
   footnotes: [Footnote!]!
 }
 
