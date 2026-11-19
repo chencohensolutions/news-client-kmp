@@ -173,6 +173,17 @@ fragment ServerSentence on Sentence {
     video
     publishedAt
   }
+  topic
+  sides {
+    value
+    footnotes {
+      url
+      sourceId
+      title
+      video
+      publishedAt
+    }
+  }
 }
 
 fragment ServerHeadline on Headline {
