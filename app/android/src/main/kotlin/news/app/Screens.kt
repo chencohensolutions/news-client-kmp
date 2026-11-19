@@ -56,6 +56,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -223,6 +224,9 @@ fun HeadlinesScreen(
     onSummary: (Story) -> Unit = {},
     /** The title bar's map of the threads (מפת פרשות). */
     onMap: () -> Unit = {},
+    onSaved: () -> Unit = {},
+    /** Updates on the stories followed not seen yet: a badge on the Saved button. */
+    followUnseen: Int = 0,
     /** Only new, back at the top: show what is still new now. */
     onRefreshOnlyNew: () -> Unit = {},
     /** The feed's switch: generated articles or the stories' original headlines. */
@@ -425,6 +429,9 @@ fun HeadlinesScreen(
                                     if (generated || state.serverOn) {
                                         IconButton(onClick = onMap) { Icon(Icons.Filled.Hub, "מפת פרשות") }
                                         IconButton(onClick = onThreads) { Icon(Icons.Filled.Timeline, "פרשות") }
+                                    }
+                                    IconButton(onClick = onSaved) {
+                                        BadgedBox(badge = { if (followUnseen > 0) Badge { Text("$followUnseen") } }) { Icon(Icons.Filled.Bookmarks, "שמורים ומעקב") }
                                     }
                                     IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "הגדרות") }
                                 },

@@ -666,6 +666,36 @@ class NewsServer(
         }
     }
 
+    /** The stories this user follows, with their updates ([ServerApi.following]); null when it isn't [inUse] or doesn't answer. */
+    suspend fun following(): List<FollowedStory>? {
+        val current = account ?: return null
+        return try {
+            call { it.following() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            null
+        } catch (e: Exception) {
+            unreachable(current)
+            null
+        }
+    }
+
+    /** Follows story [id], or stops; whether it is followed now, or null when the server didn't take it. */
+    suspend fun followStory(id: String, follow: Boolean): Boolean? {
+        val current = account ?: return null
+        return try {
+            call { it.followStory(id, follow) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ServerException) {
+            null
+        } catch (e: Exception) {
+            unreachable(current)
+            null
+        }
+    }
+
     /** How the server groups stories; null when it isn't [inUse], has stories off, or doesn't answer. */
     suspend fun grouping(): ServerGrouping? {
         val current = account ?: return null

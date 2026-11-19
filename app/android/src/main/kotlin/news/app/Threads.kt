@@ -77,6 +77,9 @@ sealed interface ThreadLayer {
 
     /** A generated story's versions ([StoryVersionsScreen]), story [id] titled [title]. */
     data class Versions(val id: String, val title: String) : ThreadLayer
+
+    /** The saved articles ([SavedScreen]). */
+    data object Saved : ThreadLayer
 }
 
 /**
