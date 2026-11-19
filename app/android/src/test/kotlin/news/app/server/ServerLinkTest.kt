@@ -66,6 +66,11 @@ class ServerLinkTest {
         assertEquals("https://192.168.50.2:8443", serverUrl(" 192.168.50.2:8443 "))
         assertEquals("https://myhome.example.org:56399", serverUrl("https://myhome.example.org/"))
         assertEquals("https://myhome.example.org:56399", serverUrl("https://myhome.example.org:56399/query"))
+        assertEquals("https://203.0.113.7:56401", serverUrl("https://203.0.113.7:56401"))
+        // Typed or pasted into the right-to-left screen: wrapped in direction marks and a zero-width space.
+        assertEquals("https://203.0.113.7:56401", serverUrl("\u200Ehttps://203.0.113.7:56401\u200F"))
+        assertEquals("https://203.0.113.7:56401", serverUrl("\u202Ahttps://203.0.113.7:56401\u202C\u200B"))
+        assertEquals("https://203.0.113.7:56401", serverUrl("\u2066203.0.113.7:56401\u2069"))
         assertNull(serverUrl(""))
         assertNull(serverUrl("http://192.168.50.2"))
         assertNull(serverUrl("my home"))

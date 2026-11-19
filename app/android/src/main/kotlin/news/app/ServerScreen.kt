@@ -149,7 +149,7 @@ private fun Enroll(address: String, code: String, error: ServerError?, connectin
             Text(
                 when (error) {
                     ServerError.UNREACHABLE -> "אין תשובה מהכתובת הזאת. השרת פועל, והטלפון באותה רשת?"
-                    ServerError.BAD_ADDRESS -> "זו לא כתובת. לדוגמה 192.168.50.2 או myhome.example.org:56399"
+                    ServerError.BAD_ADDRESS -> "זו לא כתובת. לדוגמה 192.168.50.2 או https://myhome.example.org:56401"
                     ServerError.WRONG_KEY -> "השרת בכתובת הזאת הציג מפתח אחר מזה שבקוד ה־QR. זה השרת הנכון?"
                     else -> "לדוגמה 192.168.50.2; בלי פורט: 56399"
                 },
