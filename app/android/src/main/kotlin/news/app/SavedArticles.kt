@@ -59,7 +59,8 @@ class SavedArticles(private val file: File) {
         file.parentFile?.mkdirs()
         val tmp = File(file.path + ".tmp")
         tmp.writeText(json.encodeToString(list))
-        tmp.renameTo(file)
+        // Replaces the file where renameTo wouldn't (Windows, in the unit tests).
+        java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
     }
 
     companion object {
